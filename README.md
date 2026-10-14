@@ -47,7 +47,9 @@ GitHub Pages może cache'ować pliki do ok. 10 min.
 ## Metodologia
 - Opóźnienie pociągu = opóźnienie na ostatniej stacji potwierdzonej przez PLK (odjazd, a gdy brak – przyjazd).
 - Przy zerowym opóźnieniu API pomija pola `adm`/`ddm` – traktujemy je jako 0.
-- Pomijane są „widma”: pociągi ze statusem „w trasie” bez potwierdzenia od ponad 3 h (PLK nie zamyka części kursów).
+- Pomijane są „widma” – pociągi ze statusem „w trasie”, których PLK nie zamknął lub przestał śledzić:
+  wszystkie stacje potwierdzone; została tylko stacja końcowa, a prognozowany przyjazd minął > 15 min temu;
+  prognozowany przejazd przez następną stację minął > 60 min temu; ostatnie potwierdzenie starsze niż 3 h.
 - „Opóźniony” od 6 minut, jak w statystykach UTK.
 - Pozycja na mapie: interpolacja liniowa między stacjami po czasach rzeczywistych (potwierdzone) i prognozowanych
   przez PLK. Jeśli w chwili publikacji danych pociąg powinien był minąć następną stację, a PLK tego nie potwierdził,

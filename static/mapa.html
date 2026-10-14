@@ -215,6 +215,7 @@ function locate(tr, now) {
     latlng: [a[0] + (b[0] - a[0]) * pos.f, a[1] + (b[1] - a[1]) * pos.f],
     at: pos.f === 0 ? s[pos.i] : null,
     from: s[pos.i], to: pos.f ? s[pos.i + 1] : null, extraMin: Math.round(extra / 60),
+    lastConfirmed: lastConf >= 0 ? s[lastConf] : null,
   };
 }
 
@@ -233,7 +234,11 @@ function visible(tr) {
 
 function where(loc) {
   if (!loc) return "";
-  const more = loc.extraMin >= 5 ? ` · ok. ${loc.extraMin} min później niż prognoza PLK` : "";
+  // zwykle to zwłoka w potwierdzeniach PLK, a nie dodatkowe opóźnienie - mówimy wprost, czego brakuje
+  const lc = loc.lastConfirmed;
+  const more = loc.extraMin >= 15 && lc
+    ? ` · ostatnie potwierdzenie PLK: ${esc(stationName(lc[0]))} o ${clock(dep(lc))}, pozycja przybliżona`
+    : "";
   if (loc.at) return `na stacji: ${esc(stationName(loc.at[0]))}${more}`;
   return `jedzie: ${esc(stationName(loc.from[0]))} → ${esc(stationName(loc.to[0]))}${more}`;
 }

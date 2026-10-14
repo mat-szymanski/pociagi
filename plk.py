@@ -16,7 +16,10 @@ from pathlib import Path
 
 BASE = "https://pdp-api.plk-sa.pl"
 DATA = Path(__file__).with_name("data")
-GHOST_AFTER = timedelta(hours=3)  # PLK nie zawsze zamyka pociągi - status "w trasie" potrafi zostać na dni
+# PLK nie zawsze zamyka pociągi - status "w trasie" potrafi zostać na dni. Odrzucamy pociąg, gdy:
+GHOST_AFTER = timedelta(hours=3)  # ostatnie potwierdzenie starsze niż 3 h
+LOST_AFTER = timedelta(minutes=60)  # prognozowany przejazd przez następną stację minął ponad godzinę temu
+FINISHED_AFTER = timedelta(minutes=15)  # została tylko stacja końcowa, a prognozowany przyjazd minął dawno
 DELAYED_MIN = 6  # jak UTK: do 5:59 pociąg jest punktualny
 BUCKETS = [("0–5", 0, 6), ("6–19", 6, 20), ("20–59", 20, 60), ("60+", 60, 10**6)]
 
@@ -155,7 +158,8 @@ def snapshot(key, top_n=15, data_ts=None):
     stats = stats.get("data", stats) if status == 200 and isinstance(stats, dict) else {}
     api_ts, trains, station_names, limits = fetch_operations(key)
 
-    running, map_trains, ghosts = [], [], 0
+    data_now = datetime.fromisoformat(local_time(data_ts)) if data_ts else now  # prognozy są aktualne na ten moment
+    running, map_trains, ghosts, finished = [], [], 0, 0
     for t in trains:
         if t.get("s") != "P":
             continue
@@ -166,6 +170,18 @@ def snapshot(key, top_n=15, data_ts=None):
         last = max(done, key=lambda s: s.get("asn") or s.get("psn") or 0)
         actual = last.get("ad") or last.get("aa")
         if not actual or now - datetime.fromisoformat(actual) > GHOST_AFTER:
+            ghosts += 1
+            continue
+        rest = [s for s in stops if not s.get("cn") and (s.get("psn") or 0) > (last.get("psn") or 0)]
+        if not rest:  # wszystkie stacje potwierdzone, tylko status nie zmienił się na "zakończony"
+            finished += 1
+            continue
+        predicted = rest[0].get("aa") or rest[0].get("ad")
+        late = data_now - datetime.fromisoformat(predicted) if predicted else timedelta(0)
+        if len(rest) == 1 and late > FINISHED_AFTER:  # dojechał, PLK nie potwierdził stacji końcowej
+            finished += 1
+            continue
+        if late > LOST_AFTER:  # PLK przestał śledzić pociąg
             ghosts += 1
             continue
         delay = _delay(last)
@@ -202,6 +218,7 @@ def snapshot(key, top_n=15, data_ts=None):
         "delayed": sum(r["delay"] >= DELAYED_MIN for r in running),
         "avg": round(total / n, 1) if n else 0,
         "ghosts": ghosts,
+        "finishedUnconfirmed": finished,
         "buckets": [{"label": label, "count": buckets[label]} for label, _, _ in BUCKETS],
         "carriers": carriers,
         "top": top,
