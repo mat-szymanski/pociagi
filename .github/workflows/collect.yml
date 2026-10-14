@@ -1,13 +1,12 @@
-# Zbiera dane z API PKP PLK i, gdy są nowe, publikuje stronę (licznik + mapa) na GitHub Pages.
+# Co 5 minut zbiera dane z API PKP PLK i, gdy są nowe, publikuje stronę (licznik + mapa) na GitHub Pages.
 # Wymaga: sekretu PKP_PLK_APIKEY oraz Settings -> Pages -> Source: "GitHub Actions".
-# Repozytorium prywatne: Pages tylko w planie Pro (strona i tak jest publiczna), a minuty Actions są
-# limitowane (Free 2000, Pro 3000 na miesiąc) - harmonogram jest wyłączony, uruchamianie ręczne.
-# Co 5 min to ok. 290 przebiegów na dobę - mieści się tylko w repozytorium publicznym.
+# Repozytorium publiczne: minuty Actions są darmowe (ok. 290 przebiegów na dobę). W prywatnym nie zmieści
+# się w limicie minut, a Pages wymaga tam planu Pro.
 name: Zbieranie danych
 
 on:
-  # schedule:
-  #   - cron: "2-59/5 * * * *"  # nie o pełnej godzinie - wtedy GitHub najczęściej opóźnia zadania
+  schedule:
+    - cron: "2-59/5 * * * *"  # nie o pełnej godzinie - wtedy GitHub najczęściej opóźnia zadania
   workflow_dispatch:
 
 permissions:

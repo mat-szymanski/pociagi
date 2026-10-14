@@ -18,14 +18,15 @@ pobiera migawkę (4–5 zapytań). PLK publikuje nowe dane nieregularnie, co kil
 Razem ok. 1500 zapytań na dobę przy limicie Standard 5000.
 
 ## Na GitHubie (bez własnego serwera)
-Workflow `.github/workflows/collect.yml` uruchamia `collect.py` i przy nowych danych
-publikuje katalog `static/` na GitHub Pages. Harmonogram jest domyślnie wyłączony (repozytorium prywatne):
-- GitHub Pages z prywatnego repozytorium wymaga planu Pro (lub wyższego); opublikowana strona jest publiczna.
-- Minuty Actions dla repozytoriów prywatnych: Free 2000, Pro 3000 na miesiąc; co 5 min to ok. 8600.
-  Przed włączeniem `schedule` dobierz odstęp tak, by zmieścić się w limicie.
+Strona: https://mat-szymanski.github.io/pociagi/ (mapa: `mapa.html`).
 
-1. Wypchnij projekt (`.env` jest w `.gitignore`).
-2. Settings → Secrets and variables → Actions → New repository secret: `PKP_PLK_APIKEY`.
+Workflow `.github/workflows/collect.yml` co 5 minut uruchamia `collect.py` i przy nowych danych
+publikuje katalog `static/` na GitHub Pages. Repozytorium musi być publiczne: wtedy minuty Actions są darmowe
+(w prywatnym limit 2000–3000 min/mies. nie wystarczy na ok. 8600, a Pages wymaga planu Pro).
+
+1. Wypchnij projekt do publicznego repozytorium (`.env` jest w `.gitignore`).
+2. Settings → Secrets and variables → Actions → New repository secret: `PKP_PLK_APIKEY`
+   (albo `gh secret set -f .env -R <właściciel>/<repo>`).
 3. Settings → Pages → Source: **GitHub Actions**.
 4. Actions → „Zbieranie danych” → Run workflow (pierwsze uruchomienie ręcznie).
 
