@@ -8,6 +8,10 @@ on:
   schedule:
     - cron: "2-59/5 * * * *"  # nie o pełnej godzinie - wtedy GitHub najczęściej opóźnia zadania
   workflow_dispatch:
+  # zmiana strony lub skryptów: opublikuj od razu, nie czekając na nowe dane z PLK
+  push:
+    branches: [main]
+    paths: ["static/**", "*.py", ".github/workflows/collect.yml"]
 
 permissions:
   contents: read
@@ -49,7 +53,8 @@ jobs:
         env:
           PKP_PLK_APIKEY: ${{ secrets.PKP_PLK_APIKEY }}
           HISTORY_URL: ${{ steps.pages.outputs.base_url }}/data
-        run: python collect.py
+        # z harmonogramu tylko przy nowych danych; po pushu i ręcznie zawsze pełna migawka i wdrożenie
+        run: python collect.py ${{ github.event_name != 'schedule' && '--force' || '' }}
 
       - if: steps.collect.outputs.changed == 'true'
         uses: actions/upload-pages-artifact@v5

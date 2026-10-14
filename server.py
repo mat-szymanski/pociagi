@@ -40,8 +40,8 @@ class Handler(SimpleHTTPRequestHandler):
         pass
 
     def end_headers(self):
-        if self.path.split("?")[0].endswith(".json"):
-            self.send_header("Cache-Control", "no-store")
+        # lokalnie zawsze świeże pliki - po edycji strony przeglądarka nie pokaże starej wersji
+        self.send_header("Cache-Control", "no-store" if self.path.split("?")[0].endswith(".json") else "no-cache")
         super().end_headers()
 
 

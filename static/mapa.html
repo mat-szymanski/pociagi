@@ -173,6 +173,8 @@ map.attributionControl.addAttribution('Dane: <a href="https://www.plk-sa.pl/klie
 $("rails").addEventListener("change", (e) => (e.target.checked ? rails.addTo(map) : rails.remove()));
 
 const renderer = L.canvas({ padding: 0.3 });
+map.createPane("route").style.zIndex = 350;  // pod kropkami pociągów (overlayPane = 400)
+const routeRenderer = L.canvas({ padding: 0.3, pane: "route" });
 const routeLayer = L.layerGroup().addTo(map);
 const trainLayer = L.layerGroup().addTo(map);
 
@@ -261,7 +263,10 @@ function update() {
   $("legend").innerHTML = LEVELS.map((l, i) =>
     `<div><span class="dot" style="background:var(${l.color})"></span><span>${l.label}</span><b>${counts[i]}</b></div>`).join("") +
     `<div class="muted" style="grid-template-columns:1fr">Na mapie: ${shown} z ${data.trains.length} pociągów w trasie</div>`;
-  if (selected) renderDetail();
+  if (selected) {
+    const m = markers.get(selected);
+    if ($("where") && m?._loc) $("where").innerHTML = where(m._loc);
+  }
 }
 
 function buildMarkers() {
@@ -274,13 +279,30 @@ function buildMarkers() {
       m = L.circleMarker([0, 0], { renderer, radius: 6, weight: 2, color: css("--surface"), fillOpacity: 1 });
       m.bindTooltip("", { className: "tip", direction: "top", offset: [0, -6] });
       m.on("tooltipopen", () => m.setTooltipContent(tooltipHtml(m._train, m._loc)));
-      m.on("click", () => { selected = m._train.id; renderDetail(); });
+      m.on("click", (e) => { e.originalEvent._onTrain = true; select(m._train.id === selected ? null : m._train.id); });
       markers.set(tr.id, m);
     }
     m._train = tr;
-    m.setStyle({ fillColor: color, radius: tr.d >= 20 ? 7 : 6 });
+    m.setStyle(markerStyle(tr));
   }
   for (const [id, m] of markers) if (!seen.has(id)) { trainLayer.removeLayer(m); markers.delete(id); }
+}
+
+function markerStyle(tr) {
+  const on = tr.id === selected;
+  return { fillColor: css(level(tr.d).color), radius: (tr.d >= 20 ? 7 : 6) + (on ? 3 : 0),
+           color: css(on ? "--ink" : "--surface"), weight: on ? 3 : 2 };
+}
+
+// zaznaczenie pociągu: trasa i panel budowane raz, potem co 2 s odświeżany tylko opis położenia
+function select(id) {
+  const prev = selected;
+  selected = id && data?.trains.some((t) => t.id === id) ? id : null;
+  for (const tid of [prev, selected]) {
+    const m = tid && markers.get(tid);
+    if (m) { m.setStyle(markerStyle(m._train)); if (tid === selected) m.bringToFront(); }
+  }
+  renderDetail();
 }
 
 function renderDetail() {
@@ -289,8 +311,8 @@ function renderDetail() {
   if (!tr) { $("detail").innerHTML = ""; selected = null; return; }
   const loc = locate(tr, Date.now() / 1000);
   const s = stopsOf(tr);
-  L.polyline(s.map((x) => stations[x[0]]), { color: css("--route"), weight: 3, opacity: 0.85, interactive: false }).addTo(routeLayer);
-  for (const x of s) L.circleMarker(stations[x[0]], { renderer, radius: 3, weight: 1.5, color: css("--route"), fillColor: css("--surface"), fillOpacity: 1, interactive: false }).addTo(routeLayer);
+  L.polyline(s.map((x) => stations[x[0]]), { renderer: routeRenderer, color: css("--route"), weight: 3, opacity: 0.85, interactive: false }).addTo(routeLayer);
+  for (const x of s) L.circleMarker(stations[x[0]], { renderer: routeRenderer, radius: 3, weight: 1.5, color: css("--route"), fillColor: css("--surface"), fillOpacity: 1, interactive: false }).addTo(routeLayer);
   const lv = level(tr.d);
   const rows = tr.s.map((x) => {
     const t = arr(x), planned = t ? t - x[3] * 60 : 0;
@@ -303,11 +325,11 @@ function renderDetail() {
       <div class="muted">${esc(data.carriers[tr.c] || tr.c)} · ${esc(stationName(tr.s[0][0]))} → ${esc(stationName(tr.s[tr.s.length - 1][0]))}</div></div>
       <button class="close" aria-label="Zamknij" id="close">×</button></div>
     <div class="delay-big">+${tr.d} min</div>
-    <div class="badge"><span class="dot" style="background:var(${lv.color})"></span>${lv.label} · ${where(loc)}</div>
+    <div class="badge"><span class="dot" style="background:var(${lv.color})"></span>${lv.label} · <span id="where">${where(loc)}</span></div>
     <table><thead><tr><th>Stacja</th><th class="num">Plan</th><th class="num">Rzecz./progn.</th><th class="num">Opóźn.</th></tr></thead>
     <tbody>${rows}</tbody></table>
     <div class="muted" style="margin-top:6px">Szare – stacje już potwierdzone przez PLK; pozostałe czasy to prognoza.</div></div>`;
-  $("close").onclick = () => { selected = null; renderDetail(); };
+  $("close").onclick = () => select(null);
 }
 
 function fillCarriers() {
@@ -328,21 +350,27 @@ async function getJson(path) {
 
 async function load() {
   try {
-    data = await getJson("data/trains.json");
-    const age = Math.round((Date.now() / 1000 - data.epoch) / 60);
+    const fresh = await getJson("data/trains.json");
+    const age = Math.round((Date.now() / 1000 - fresh.epoch) / 60);
     $("status").textContent = age > 30
-      ? `Dane PLK sprzed ${age} min (${clock(data.epoch)}) – zbieranie danych mogło się zatrzymać`
-      : `Dane PLK z ${clock(data.epoch)} · pozycje przeliczane na bieżąco`;
+      ? `Dane PLK sprzed ${age} min (${clock(fresh.epoch)}) – zbieranie danych mogło się zatrzymać`
+      : `Dane PLK z ${clock(fresh.epoch)} · pozycje przeliczane na bieżąco`;
     $("status").className = age > 30 ? "muted status-error" : "muted";
+    if (data && fresh.epoch === data.epoch) return;  // te same dane - nic nie przebudowujemy
+    data = fresh;
     buildMarkers();
     fillCarriers();
     update();
+    if (selected) select(selected);  // nowe dane: odśwież trasę i tabelę (albo zamknij, gdy pociąg dojechał)
   } catch (e) {
     $("status").textContent = `Nie udało się wczytać danych (${e.message})`;
     $("status").className = "muted status-error";
   }
 }
 
+// kliknięcie w puste miejsce mapy albo Esc zamyka trasę
+map.on("click", (e) => { if (!e.originalEvent._onTrain && selected) select(null); });
+addEventListener("keydown", (e) => { if (e.key === "Escape" && selected) select(null); });
 $("collapse").addEventListener("click", () => {
   const collapsed = document.querySelector(".panel").classList.toggle("collapsed");
   $("collapse").textContent = collapsed ? "Rozwiń" : "Zwiń";
