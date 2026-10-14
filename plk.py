@@ -2,7 +2,7 @@
 
 Opóźnienie pociągu = opóźnienie na ostatniej potwierdzonej stacji (odjazd, a gdy brak - przyjazd).
 Koszt migawki: 1 /statistics + 2-3 /operations (PLK publikuje nowe dane co kilka minut);
-trasy i przewoźnicy pobierani raz na dobę (cache w data/).
+rozkład z numerami pociągów i przewoźnicy pobierani raz na dobę (cache w data/).
 Czasy w API są lokalne (Europe/Warsaw) bez strefy - przeliczamy je sami, bo np. GitHub Actions działa w UTC.
 """
 import json
@@ -94,10 +94,41 @@ def _cached(name, path, key):
     return json.loads(cache.read_text(encoding="utf-8"))
 
 
+def train_number(route):
+    """Numer pociągu w zapisie kolejowym: '12242', a gdy zmienia się w trasie - '12242/3' albo '5616/77811'."""
+    nums = []
+    for n in [route.get("nn")] + [st.get("dtn") or st.get("atn") for st in route.get("st", [])]:
+        n = (n or "").strip().lstrip("0") or (n or "").strip()
+        if n and n not in nums:
+            nums.append(n)
+    if not nums:
+        return ""
+    parts = [nums[0]]
+    for n in nums[1:3]:
+        if len(n) == len(nums[0]):  # ta sama długość: jak w rozkładach PKP, tylko różniące się końcówki
+            i = next((i for i, (x, y) in enumerate(zip(nums[0], n)) if x != y), len(n) - 1)
+            n = n[i:]
+        parts.append(n)
+    return "/".join(parts)
+
+
 def routes_for(day, key):
-    """(data kursowania, orderId) -> (kod przewoźnika, nazwa pociągu)."""
-    body = _cached(f"routes_{day}.json", f"/api/v1/schedules/routes/{day}/shortened", key)
-    return {(day, r["oid"]): (r.get("cc") or "?", r.get("nm") or "") for r in body.get("r", [])}
+    """(data kursowania, orderId) -> (przewoźnik, nazwa, kategoria handlowa, numer).
+
+    Pełny rozkład dnia z /schedules (1 zapytanie, ok. 20 MB) - tylko on ma numery pociągów;
+    w cache zostaje sama mała mapa orderId -> dane.
+    """
+    DATA.mkdir(exist_ok=True)
+    cache = DATA / f"trains_{day}.json"
+    if not cache.exists():
+        status, body, _ = get(f"/api/v1/schedules/shortened?dateFrom={day}&dateTo={day}&dictionaries=false", key)
+        if status != 200:
+            raise ApiError(f"schedules {day}: HTTP {status} {body}")
+        info = {str(r["oid"]): [r.get("cc") or "?", r.get("nm") or "", r.get("ccs") or "", train_number(r)]
+                for r in body.get("rt", [])}
+        cache.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+    info = json.loads(cache.read_text(encoding="utf-8"))
+    return {(day, int(oid)): tuple(v) for oid, v in info.items()}
 
 
 def short_name(name):
@@ -185,12 +216,13 @@ def snapshot(key, top_n=15, data_ts=None):
             ghosts += 1
             continue
         delay = _delay(last)
-        carrier, name = routes.get((t["od"][:10], t["oid"]), ("?", ""))
+        carrier, name, cat, number = routes.get((t["od"][:10], t["oid"]), ("?", "", "", ""))
         station = lambda s: station_names.get(str(s["id"]), str(s["id"]))
-        running.append({"carrier": carrier, "name": name, "delay": delay, "at": station(last),
+        running.append({"carrier": carrier, "name": name, "cat": cat, "number": number, "delay": delay,
+                        "at": station(last),
                         "from": station(stops[0]), "to": station(stops[-1])})
         map_trains.append({
-            "id": f"{t['od'][:10]}_{t['oid']}", "c": carrier, "n": name, "d": delay,
+            "id": f"{t['od'][:10]}_{t['oid']}", "c": carrier, "n": name, "k": cat, "no": number, "d": delay,
             # [id stacji, przyjazd, odjazd (Unix s, 0 = brak), opóźnienie, 1 = potwierdzone, 1 = odwołany postój]
             "s": [[s["id"], epoch(s.get("aa")), epoch(s.get("ad")), _delay(s), int(bool(s.get("cf"))),
                    int(bool(s.get("cn")))] for s in stops],

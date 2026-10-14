@@ -114,6 +114,7 @@
   td { padding: 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   td.num b { font-weight: 600; }
+  .train-no { font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .table-scroll { overflow-x: auto; }
   details summary { cursor: pointer; color: var(--ink-2); font-size: 13px; margin-top: 12px; }
   footer { margin-top: 24px; color: var(--muted); font-size: 13px; }
@@ -188,7 +189,7 @@
     <div class="card-head"><div><h2>Najbardziej opóźnione teraz</h2><div class="muted">według ostatniej potwierdzonej stacji</div></div></div>
     <div class="table-scroll">
       <table>
-        <thead><tr><th class="num">Opóźnienie</th><th>Przewoźnik</th><th>Relacja</th><th class="hide-sm">Ostatnio</th></tr></thead>
+        <thead><tr><th class="num">Opóźnienie</th><th>Pociąg</th><th>Relacja</th><th class="hide-sm">Ostatnio</th></tr></thead>
         <tbody id="top"></tbody>
       </table>
     </div>
@@ -260,7 +261,8 @@ function renderNow(s) {
   $("top").innerHTML = s.top.length ? s.top.map((t) => `
     <tr>
       <td class="num"><b>+${t.delay}</b> min</td>
-      <td title="${esc(t.carrierName)}">${esc(t.carrier)}${t.name ? ` <span class="muted">${esc(t.name)}</span>` : ""}</td>
+      <td title="${esc(t.carrierName)}"><span class="train-no">${esc([t.cat, t.number].filter(Boolean).join(" ") || t.carrier)}</span>${t.name ? ` ${esc(t.name)}` : ""}
+        <div class="muted">${esc(t.carrierName)}</div></td>
       <td>${esc(t.from)} → ${esc(t.to)}</td>
       <td class="hide-sm">${esc(t.at)}</td>
     </tr>`).join("") : `<tr><td colspan="4" class="muted">Brak pociągów w trasie</td></tr>`;

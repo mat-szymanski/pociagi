@@ -42,11 +42,11 @@ jobs:
       - id: day
         run: echo "day=$(TZ=Europe/Warsaw date +%F)" >> "$GITHUB_OUTPUT"
 
-      # trasy i przewoźnicy pobierani z API raz na dobę
+      # rozkład (numery pociągów) i przewoźnicy pobierani z API raz na dobę
       - uses: actions/cache@v6
         with:
           path: data
-          key: plk-${{ steps.day.outputs.day }}
+          key: plk-v2-${{ steps.day.outputs.day }}  # v2: pełny rozkład z numerami pociągów
 
       - id: collect
         name: Zbierz dane z PKP PLK

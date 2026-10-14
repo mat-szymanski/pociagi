@@ -74,6 +74,10 @@
   nav a:hover { background: var(--chip); }
   nav a[aria-current] { color: var(--ink); font-weight: 600; background: var(--chip); }
   .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  input[type="search"] {
+    font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 5px 8px; width: 100%;
+  }
   select {
     font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border);
     border-radius: 8px; padding: 5px 8px; max-width: 100%;
@@ -128,6 +132,7 @@
   <div class="muted">Pozycja szacowana z czasów przejazdu przez stacje (PLK nie udostępnia GPS).</div>
 
   <div class="row">
+    <input id="search" type="search" placeholder="Numer lub nazwa pociągu" aria-label="Szukaj pociągu" autocomplete="off">
     <select id="carrier" aria-label="Przewoźnik"><option value="">Wszyscy przewoźnicy</option></select>
   </div>
   <div class="row chips" role="group" aria-label="Minimalne opóźnienie" id="min-delay">
@@ -180,7 +185,7 @@ const trainLayer = L.layerGroup().addTo(map);
 
 let stations = {}, data = null, selected = null;
 const markers = new Map();
-const filters = { carrier: "", min: 0 };
+const filters = { carrier: "", min: 0, q: "" };
 
 // --- pozycja: interpolacja między stacjami po czasach rzeczywistych (potwierdzonych) i prognozowanych ---
 const arr = (s) => s[1] || s[2];
@@ -224,12 +229,20 @@ function stationName(id) {
 }
 
 function trainTitle(tr) {
-  const carrier = data.carriers[tr.c] || tr.c;
-  return tr.n ? `${tr.c} ${tr.n}` : carrier;
+  const no = [tr.k, tr.no].filter(Boolean).join(" ");  // np. "IC 5122", "R 12242/3", "BUS 49011"
+  return [no || data.carriers[tr.c] || tr.c, tr.n].filter(Boolean).join(" ");
+}
+
+// wyszukiwanie: numer (także fragment po ukośniku, np. "12243" dla "12242/3"), nazwa albo kategoria
+function matches(tr, q) {
+  if (!q) return true;
+  const nums = (tr.no || "").split("/");
+  const full = nums.map((n) => nums[0].slice(0, nums[0].length - n.length) + n);
+  return full.some((n) => n.startsWith(q)) || trainTitle(tr).toLowerCase().includes(q);
 }
 
 function visible(tr) {
-  return (!filters.carrier || tr.c === filters.carrier) && tr.d >= filters.min;
+  return (!filters.carrier || tr.c === filters.carrier) && tr.d >= filters.min && matches(tr, filters.q);
 }
 
 function where(loc) {
@@ -380,6 +393,15 @@ $("collapse").addEventListener("click", () => {
   const collapsed = document.querySelector(".panel").classList.toggle("collapsed");
   $("collapse").textContent = collapsed ? "Rozwiń" : "Zwiń";
   $("collapse").setAttribute("aria-expanded", !collapsed);
+});
+$("search").addEventListener("input", (e) => { filters.q = e.target.value.trim().toLowerCase(); update(); });
+// Enter: pokaż i zaznacz pierwszy pasujący pociąg
+$("search").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || !data) return;
+  const hit = data.trains.find((t) => visible(t) && markers.get(t.id)?._loc);
+  if (!hit) return;
+  map.flyTo(markers.get(hit.id).getLatLng(), Math.max(map.getZoom(), 11), { duration: 0.8 });
+  select(hit.id);
 });
 $("carrier").addEventListener("change", (e) => { filters.carrier = e.target.value; update(); });
 $("min-delay").addEventListener("click", (e) => {
