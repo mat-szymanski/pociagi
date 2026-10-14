@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mapa pociągów</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --border: rgba(11, 11, 11, 0.10);
+    --chip: #eef4fc;
+    --route: #2a78d6;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --serious: #ec835a;
+    --critical: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --grid: #2c2c2a;
+      --border: rgba(255, 255, 255, 0.10);
+      --chip: #1f2a38;
+      --route: #3987e5;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --grid: #2c2c2a;
+    --border: rgba(255, 255, 255, 0.10);
+    --chip: #1f2a38;
+    --route: #3987e5;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #map { position: absolute; inset: 0; background: var(--page); }
+  .leaflet-container { font: inherit; }
+  /* podkład OSM wyciszony, żeby kolory opóźnień były najgłośniejsze */
+  .basemap { filter: grayscale(1) contrast(0.85) brightness(1.08); }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .basemap { filter: grayscale(1) invert(1) brightness(0.75) contrast(0.9); }
+  }
+  :root[data-theme="dark"] .basemap { filter: grayscale(1) invert(1) brightness(0.75) contrast(0.9); }
+  .leaflet-control-attribution { font-size: 11px; }
+
+  .panel {
+    position: absolute; z-index: 1000; top: 12px; left: 12px; width: 340px; max-height: calc(100% - 24px);
+    overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+  }
+  h1 { font-size: 17px; margin: 0; font-weight: 600; }
+  h2 { font-size: 15px; margin: 0; font-weight: 600; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .status-error { color: var(--critical); }
+  nav { display: flex; gap: 4px; margin: 8px 0 12px; }
+  nav a { color: var(--ink-2); text-decoration: none; padding: 3px 10px; border-radius: 8px; }
+  nav a:hover { background: var(--chip); }
+  nav a[aria-current] { color: var(--ink); font-weight: 600; background: var(--chip); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  select {
+    font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 5px 8px; max-width: 100%;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip {
+    font: inherit; font-size: 13px; color: var(--ink-2); background: transparent; border: 1px solid var(--border);
+    border-radius: 999px; padding: 3px 10px; cursor: pointer;
+  }
+  .chip[aria-pressed="true"] { background: var(--chip); color: var(--ink); font-weight: 600; }
+  label.toggle { display: flex; gap: 6px; align-items: center; color: var(--ink-2); cursor: pointer; }
+
+  .legend { display: grid; gap: 4px; margin-top: 12px; }
+  .legend div { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: center; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 0 2px var(--surface); }
+  .legend b { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  .detail { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--grid); }
+  .detail-head { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+  .close { font: inherit; font-size: 18px; line-height: 1; background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0 4px; }
+  .delay-big { font-size: 28px; font-weight: 600; margin: 6px 0 2px; }
+  .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+  th { text-align: left; font-weight: 500; color: var(--muted); padding: 4px 4px; border-bottom: 1px solid var(--grid); }
+  td { padding: 5px 4px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr.past td { color: var(--muted); }
+  tr.cancelled td { text-decoration: line-through; color: var(--muted); }
+
+  .tip { font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .leaflet-tooltip.tip { background: var(--surface); color: var(--ink); border: 1px solid var(--border); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15); }
+  .leaflet-tooltip-top.tip::before { border-top-color: var(--surface); }
+
+  .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .collapse { display: none; font: inherit; font-size: 13px; color: var(--ink-2); background: var(--chip); border: 0; border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+  @media (max-width: 640px) {
+    .panel { top: auto; bottom: 12px; left: 12px; right: 12px; width: auto; max-height: 48%; padding: 12px 14px; }
+    .collapse { display: inline-block; }
+    .panel.collapsed #panel-body { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="map" role="application" aria-label="Mapa pociągów w trasie"></div>
+
+<aside class="panel">
+  <div class="panel-head"><h1>Mapa pociągów</h1>
+    <button class="collapse" id="collapse" aria-expanded="true" aria-controls="panel-body">Zwiń</button></div>
+  <div id="panel-body">
+  <nav><a href="./">Licznik</a><a href="mapa.html" aria-current="page">Mapa pociągów</a></nav>
+  <div class="muted" id="status">Ładowanie…</div>
+  <div class="muted">Pozycja szacowana z czasów przejazdu przez stacje (PLK nie udostępnia GPS).</div>
+
+  <div class="row">
+    <select id="carrier" aria-label="Przewoźnik"><option value="">Wszyscy przewoźnicy</option></select>
+  </div>
+  <div class="row chips" role="group" aria-label="Minimalne opóźnienie" id="min-delay">
+    <button class="chip" data-min="0" aria-pressed="true">Wszystkie</button>
+    <button class="chip" data-min="6">od 6 min</button>
+    <button class="chip" data-min="20">od 20 min</button>
+    <button class="chip" data-min="60">od 60 min</button>
+  </div>
+  <div class="row"><label class="toggle"><input type="checkbox" id="rails" checked> Pokaż tory (OpenRailwayMap)</label></div>
+
+  <div class="legend" id="legend"></div>
+  <div id="detail"></div>
+  </div>
+</aside>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const clock = (sec) => new Date(sec * 1000).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Warsaw" });
+const LEVELS = [
+  { min: 0, label: "0–5 min", color: "--good" },
+  { min: 6, label: "6–19 min", color: "--warning" },
+  { min: 20, label: "20–59 min", color: "--serious" },
+  { min: 60, label: "60 min i więcej", color: "--critical" },
+];
+const level = (d) => LEVELS.reduce((acc, l) => (d >= l.min ? l : acc), LEVELS[0]);
+
+// --- mapa ---
+const dark = matchMedia("(prefers-color-scheme: dark)").matches && document.documentElement.dataset.theme !== "light";
+const map = L.map("map", { zoomControl: false, preferCanvas: true }).fitBounds([[49.0, 14.1], [54.85, 24.15]]);
+L.control.zoom({ position: "topright" }).addTo(map);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19, className: "basemap",
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+}).addTo(map);
+const rails = L.tileLayer("https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png", {
+  maxZoom: 19, subdomains: "abc", opacity: dark ? 0.3 : 0.35,
+  attribution: '<a href="https://www.openrailwaymap.org/">OpenRailwayMap</a>',
+}).addTo(map);
+map.attributionControl.addAttribution('Dane: <a href="https://www.plk-sa.pl/klienci-i-kontrahenci/api-otwarte-dane">PKP PLK</a> · stacje: <a href="https://github.com/JanKemnitz/PolishTrainsGTFS">PolishTrainsGTFS</a> (CC0)');
+$("rails").addEventListener("change", (e) => (e.target.checked ? rails.addTo(map) : rails.remove()));
+
+const renderer = L.canvas({ padding: 0.3 });
+const routeLayer = L.layerGroup().addTo(map);
+const trainLayer = L.layerGroup().addTo(map);
+
+let stations = {}, data = null, selected = null;
+const markers = new Map();
+const filters = { carrier: "", min: 0 };
+
+// --- pozycja: interpolacja między stacjami po czasach rzeczywistych (potwierdzonych) i prognozowanych ---
+const arr = (s) => s[1] || s[2];
+const dep = (s) => s[2] || s[1];
+
+function stopsOf(tr) {
+  return tr.s.filter((s) => stations[s[0]] && !s[5]);
+}
+
+function locate(tr, now) {
+  const s = stopsOf(tr);
+  if (!s.length) return null;
+  let lastConf = -1;
+  s.forEach((x, i) => { if (x[4]) lastConf = i; });
+  // Jeśli już w chwili publikacji danych pociąg powinien był wg prognozy minąć następną stację,
+  // a PLK tego nie potwierdził, to jest później niż prognoza: przesuwamy resztę trasy o tę różnicę.
+  const next = lastConf + 1;
+  const extra = next > 0 && next < s.length ? Math.max(0, data.epoch - arr(s[next])) : 0;
+  const A = (i) => arr(s[i]) + (i >= next ? extra : 0);
+  const D = (i) => dep(s[i]) + (i >= next ? extra : 0);
+  let pos = null;
+  if (now <= D(0)) pos = { i: 0, f: 0 };
+  for (let i = 0; !pos && i < s.length; i++) {
+    if (now >= A(i) && now <= D(i)) pos = { i, f: 0 };
+    else if (i + 1 < s.length && now > D(i) && now < A(i + 1)) {
+      pos = { i, f: (now - D(i)) / Math.max(A(i + 1) - D(i), 1) };
+    }
+  }
+  if (!pos) pos = { i: s.length - 1, f: 0 };
+  const a = stations[s[pos.i][0]], b = stations[s[Math.min(pos.i + 1, s.length - 1)][0]];
+  return {
+    latlng: [a[0] + (b[0] - a[0]) * pos.f, a[1] + (b[1] - a[1]) * pos.f],
+    at: pos.f === 0 ? s[pos.i] : null,
+    from: s[pos.i], to: pos.f ? s[pos.i + 1] : null, extraMin: Math.round(extra / 60),
+  };
+}
+
+function stationName(id) {
+  return data.stationNames[id] || stations[id]?.[2] || id;
+}
+
+function trainTitle(tr) {
+  const carrier = data.carriers[tr.c] || tr.c;
+  return tr.n ? `${tr.c} ${tr.n}` : carrier;
+}
+
+function visible(tr) {
+  return (!filters.carrier || tr.c === filters.carrier) && tr.d >= filters.min;
+}
+
+function where(loc) {
+  if (!loc) return "";
+  const more = loc.extraMin >= 5 ? ` · ok. ${loc.extraMin} min później niż prognoza PLK` : "";
+  if (loc.at) return `na stacji: ${esc(stationName(loc.at[0]))}${more}`;
+  return `jedzie: ${esc(stationName(loc.from[0]))} → ${esc(stationName(loc.to[0]))}${more}`;
+}
+
+function tooltipHtml(tr, loc) {
+  const first = tr.s[0], last = tr.s[tr.s.length - 1];
+  return `<b>${esc(trainTitle(tr))}</b> · <b>+${tr.d} min</b><br>` +
+    `<span class="muted">${esc(stationName(first[0]))} → ${esc(stationName(last[0]))}</span><br>${where(loc)}`;
+}
+
+function update() {
+  if (!data) return;
+  const now = Date.now() / 1000;
+  const counts = LEVELS.map(() => 0);
+  let shown = 0;
+  for (const tr of data.trains) {
+    const m = markers.get(tr.id);
+    const loc = visible(tr) ? locate(tr, now) : null;
+    if (!loc) { if (m) trainLayer.removeLayer(m); continue; }
+    shown++;
+    counts[LEVELS.indexOf(level(tr.d))]++;
+    if (!m) continue;
+    m.setLatLng(loc.latlng);
+    m._loc = loc;
+    if (!trainLayer.hasLayer(m)) trainLayer.addLayer(m);
+  }
+  $("legend").innerHTML = LEVELS.map((l, i) =>
+    `<div><span class="dot" style="background:var(${l.color})"></span><span>${l.label}</span><b>${counts[i]}</b></div>`).join("") +
+    `<div class="muted" style="grid-template-columns:1fr">Na mapie: ${shown} z ${data.trains.length} pociągów w trasie</div>`;
+  if (selected) renderDetail();
+}
+
+function buildMarkers() {
+  const seen = new Set();
+  for (const tr of data.trains) {
+    seen.add(tr.id);
+    let m = markers.get(tr.id);
+    const color = css(level(tr.d).color);
+    if (!m) {
+      m = L.circleMarker([0, 0], { renderer, radius: 6, weight: 2, color: css("--surface"), fillOpacity: 1 });
+      m.bindTooltip("", { className: "tip", direction: "top", offset: [0, -6] });
+      m.on("tooltipopen", () => m.setTooltipContent(tooltipHtml(m._train, m._loc)));
+      m.on("click", () => { selected = m._train.id; renderDetail(); });
+      markers.set(tr.id, m);
+    }
+    m._train = tr;
+    m.setStyle({ fillColor: color, radius: tr.d >= 20 ? 7 : 6 });
+  }
+  for (const [id, m] of markers) if (!seen.has(id)) { trainLayer.removeLayer(m); markers.delete(id); }
+}
+
+function renderDetail() {
+  const tr = data?.trains.find((t) => t.id === selected);
+  routeLayer.clearLayers();
+  if (!tr) { $("detail").innerHTML = ""; selected = null; return; }
+  const loc = locate(tr, Date.now() / 1000);
+  const s = stopsOf(tr);
+  L.polyline(s.map((x) => stations[x[0]]), { color: css("--route"), weight: 3, opacity: 0.85, interactive: false }).addTo(routeLayer);
+  for (const x of s) L.circleMarker(stations[x[0]], { renderer, radius: 3, weight: 1.5, color: css("--route"), fillColor: css("--surface"), fillOpacity: 1, interactive: false }).addTo(routeLayer);
+  const lv = level(tr.d);
+  const rows = tr.s.map((x) => {
+    const t = arr(x), planned = t ? t - x[3] * 60 : 0;
+    const cls = x[5] ? "cancelled" : x[4] ? "past" : "";
+    return `<tr class="${cls}"><td>${esc(stationName(x[0]))}</td><td class="num">${t ? clock(planned) : "–"}</td>` +
+      `<td class="num">${t ? clock(t) : "–"}</td><td class="num">${x[3] ? "+" + x[3] : "0"}</td></tr>`;
+  }).join("");
+  $("detail").innerHTML = `<div class="detail">
+    <div class="detail-head"><div><h2>${esc(trainTitle(tr))}</h2>
+      <div class="muted">${esc(data.carriers[tr.c] || tr.c)} · ${esc(stationName(tr.s[0][0]))} → ${esc(stationName(tr.s[tr.s.length - 1][0]))}</div></div>
+      <button class="close" aria-label="Zamknij" id="close">×</button></div>
+    <div class="delay-big">+${tr.d} min</div>
+    <div class="badge"><span class="dot" style="background:var(${lv.color})"></span>${lv.label} · ${where(loc)}</div>
+    <table><thead><tr><th>Stacja</th><th class="num">Plan</th><th class="num">Rzecz./progn.</th><th class="num">Opóźn.</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <div class="muted" style="margin-top:6px">Szare – stacje już potwierdzone przez PLK; pozostałe czasy to prognoza.</div></div>`;
+  $("close").onclick = () => { selected = null; renderDetail(); };
+}
+
+function fillCarriers() {
+  const sel = $("carrier"), cur = sel.value;
+  const count = {};
+  for (const tr of data.trains) count[tr.c] = (count[tr.c] || 0) + 1;
+  const codes = Object.keys(count).filter((c) => c !== "?").sort((a, b) => count[b] - count[a]);
+  sel.innerHTML = `<option value="">Wszyscy przewoźnicy</option>` +
+    codes.map((c) => `<option value="${esc(c)}">${esc(data.carriers[c] || c)} (${count[c]})</option>`).join("");
+  sel.value = codes.includes(cur) ? cur : "";
+}
+
+async function getJson(path) {
+  const r = await fetch(`${path}?t=${Math.floor(Date.now() / 60000)}`);
+  if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
+  return r.json();
+}
+
+async function load() {
+  try {
+    data = await getJson("data/trains.json");
+    const age = Math.round((Date.now() / 1000 - data.epoch) / 60);
+    $("status").textContent = age > 30
+      ? `Dane PLK sprzed ${age} min (${clock(data.epoch)}) – zbieranie danych mogło się zatrzymać`
+      : `Dane PLK z ${clock(data.epoch)} · pozycje przeliczane na bieżąco`;
+    $("status").className = age > 30 ? "muted status-error" : "muted";
+    buildMarkers();
+    fillCarriers();
+    update();
+  } catch (e) {
+    $("status").textContent = `Nie udało się wczytać danych (${e.message})`;
+    $("status").className = "muted status-error";
+  }
+}
+
+$("collapse").addEventListener("click", () => {
+  const collapsed = document.querySelector(".panel").classList.toggle("collapsed");
+  $("collapse").textContent = collapsed ? "Rozwiń" : "Zwiń";
+  $("collapse").setAttribute("aria-expanded", !collapsed);
+});
+$("carrier").addEventListener("change", (e) => { filters.carrier = e.target.value; update(); });
+$("min-delay").addEventListener("click", (e) => {
+  const b = e.target.closest(".chip");
+  if (!b) return;
+  filters.min = +b.dataset.min;
+  for (const c of $("min-delay").children) c.setAttribute("aria-pressed", c === b);
+  update();
+});
+
+getJson("data/stations.json").then((s) => { stations = s; return load(); });
+setInterval(update, 2000);
+setInterval(load, 60000);
+</script>
+</body>
+</html>

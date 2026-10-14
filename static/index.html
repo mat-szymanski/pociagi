@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ile opóźnienia</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --series: #2a78d6;
+    --series-wash: rgba(42, 120, 214, 0.10);
+    --bar-track: #eef4fc;
+    --critical: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --series: #3987e5;
+      --series-wash: rgba(57, 135, 229, 0.14);
+      --bar-track: #1f2a38;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --series: #3987e5;
+    --series-wash: rgba(57, 135, 229, 0.14);
+    --bar-track: #1f2a38;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 1120px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 24px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 600; }
+  h2 { font-size: 15px; margin: 0 0 2px; font-weight: 600; }
+  .sub { color: var(--ink-2); margin: 0; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .status-error { color: var(--critical); }
+  .header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .header-right p { margin: 0; }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--ink-2); text-decoration: none; font-size: 14px; padding: 4px 10px; border-radius: 8px; }
+  nav a:hover { background: var(--bar-track); }
+  nav a[aria-current] { color: var(--ink); font-weight: 600; background: var(--bar-track); }
+  @media (max-width: 760px) { .header-right { align-items: flex-start; } }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  .hero { margin-top: 20px; display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 2fr); gap: 16px; }
+  .hero-value { font-size: clamp(48px, 9vw, 84px); font-weight: 600; line-height: 1; letter-spacing: -0.02em; margin: 12px 0 8px; }
+  .hero-value small { font-size: 0.38em; font-weight: 500; color: var(--ink-2); letter-spacing: 0; }
+  .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .tile .label { color: var(--ink-2); font-size: 13px; }
+  .tile .value { font-size: 28px; font-weight: 600; margin-top: 4px; }
+  .tile .note { color: var(--muted); font-size: 13px; }
+
+  .grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-top: 16px; }
+  section.card { margin-top: 16px; }
+  .grid2 section.card { margin-top: 0; }
+  .card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 8px 16px; margin-bottom: 12px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; }
+  select {
+    font: inherit; font-size: 14px; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px;
+  }
+
+  .chart { position: relative; }
+  .chart svg { display: block; width: 100%; height: 260px; overflow: visible; }
+  .chart text { fill: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .tooltip {
+    position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; font-size: 13px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    white-space: nowrap; opacity: 0; transition: opacity 0.1s;
+  }
+  .tooltip b { font-weight: 600; }
+  .empty { color: var(--muted); padding: 48px 0; text-align: center; }
+
+  .bars { display: grid; gap: 10px; }
+  .bar-row { display: grid; grid-template-columns: minmax(84px, 150px) minmax(0, 1fr); gap: 12px; align-items: center; }
+  .bar-name { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-wrap { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .bar { height: 18px; background: var(--series); border-radius: 0 4px 4px 0; min-width: 2px; flex: none; }
+  .bar-val { font-size: 13px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .bar-val b { color: var(--ink); font-weight: 600; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-weight: 500; color: var(--muted); font-size: 13px; padding: 6px 8px; border-bottom: 1px solid var(--grid); }
+  td { padding: 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.num b { font-weight: 600; }
+  .table-scroll { overflow-x: auto; }
+  details summary { cursor: pointer; color: var(--ink-2); font-size: 13px; margin-top: 12px; }
+  footer { margin-top: 24px; color: var(--muted); font-size: 13px; }
+  footer p { margin: 4px 0; }
+
+  @media (max-width: 760px) {
+    .hero, .grid2 { grid-template-columns: minmax(0, 1fr); }
+    .hide-sm { display: none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Ile opóźnienia</h1>
+      <p class="sub">Łączne opóźnienie pociągów, które są teraz w trasie po sieci PKP PLK</p>
+    </div>
+    <div class="header-right">
+      <nav><a href="./" aria-current="page">Licznik</a><a href="mapa.html">Mapa pociągów</a></nav>
+      <p class="muted" id="status">Ładowanie…</p>
+    </div>
+  </header>
+
+  <div class="hero">
+    <div class="card">
+      <div class="tile"><div class="label">Suma opóźnień w tej chwili</div></div>
+      <div class="hero-value" id="hero">–</div>
+      <div class="muted" id="hero-note"></div>
+    </div>
+    <div class="tiles">
+      <div class="card tile"><div class="label">Pociągi w trasie</div><div class="value" id="t-running">–</div><div class="note" id="t-running-note"></div></div>
+      <div class="card tile"><div class="label">Opóźnione o 6 min i więcej</div><div class="value" id="t-delayed">–</div><div class="note" id="t-delayed-note"></div></div>
+      <div class="card tile"><div class="label">Średnio na pociąg</div><div class="value" id="t-avg">–</div><div class="note">licząc pociągi punktualne</div></div>
+      <div class="card tile"><div class="label">Odwołane dziś</div><div class="value" id="t-cancel">–</div><div class="note" id="t-cancel-note"></div></div>
+    </div>
+  </div>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>Suma opóźnień w ciągu dnia</h2>
+        <div class="muted" id="chart-sub">minuty, pociągi w trasie</div>
+      </div>
+      <div class="filters">
+        <select id="day" aria-label="Dzień"></select>
+        <select id="carrier" aria-label="Przewoźnik"><option value="">Wszyscy przewoźnicy</option></select>
+      </div>
+    </div>
+    <div class="chart" id="chart">
+      <svg id="svg" role="img" aria-label="Wykres sumy opóźnień w ciągu dnia"></svg>
+      <div class="tooltip" id="tip"></div>
+    </div>
+    <details>
+      <summary>Pokaż dane w tabeli</summary>
+      <div class="table-scroll"><table id="history-table"></table></div>
+    </details>
+  </section>
+
+  <div class="grid2">
+    <section class="card">
+      <div class="card-head"><div><h2>Przewoźnicy</h2><div class="muted">suma minut opóźnienia teraz</div></div></div>
+      <div class="bars" id="carriers"></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><div><h2>Jak bardzo opóźnione</h2><div class="muted">liczba pociągów w trasie wg opóźnienia</div></div></div>
+      <div class="bars" id="buckets"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="card-head"><div><h2>Najbardziej opóźnione teraz</h2><div class="muted">według ostatniej potwierdzonej stacji</div></div></div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th class="num">Opóźnienie</th><th>Przewoźnik</th><th>Relacja</th><th class="hide-sm">Ostatnio</th></tr></thead>
+        <tbody id="top"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <p>Źródło danych: PKP Polskie Linie Kolejowe S.A., API Otwarte Dane Kolejowe. Dane mają charakter informacyjny.</p>
+    <p>Opóźnienie pociągu = opóźnienie na ostatniej stacji potwierdzonej przez PLK. Pomijane są pociągi bez potwierdzenia od ponad 3 godzin (PLK nie zamyka części kursów). Próg „opóźniony” jak w statystykach UTK: od 6 minut.</p>
+  </footer>
+</main>
+
+<script>
+const fmt = new Intl.NumberFormat("pl-PL");
+const fmt1 = new Intl.NumberFormat("pl-PL", { maximumFractionDigits: 1 });
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const hhmm = (ts) => ts.slice(11, 16);
+const today = () => new Date().toLocaleDateString("sv-SE");
+// 1 pociąg, 2–4 pociągi, 5+ pociągów (ale 12–14 pociągów)
+const trains = (n) => `${fmt.format(n)} ${n === 1 ? "pociąg" : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? "pociągi" : "pociągów"}`;
+
+let history = { day: today(), points: [] };
+let carrierNames = {};
+
+function hours(min) {
+  const h = Math.floor(min / 60), m = Math.round(min % 60);
+  return h ? `${h} h ${m} min` : `${m} min`;
+}
+
+function renderNow(s) {
+  if (!s) {
+    $("status").textContent = "Pierwsza migawka w drodze…";
+    return;
+  }
+  const age = Math.round((Date.now() / 1000 - s.epoch) / 60);
+  const stale = age > 30;
+  $("status").textContent = stale
+    ? `Dane PLK sprzed ${hours(age)} (${hhmm(s.ts)}) – zbieranie danych mogło się zatrzymać`
+    : `Dane PLK z ${hhmm(s.ts)} · PLK publikuje nowe co kilka minut`;
+  $("status").className = stale ? "muted status-error" : "muted";
+
+  $("hero").innerHTML = `${fmt.format(s.total)} <small>min</small>`;
+  $("hero-note").textContent = `≈ ${hours(s.total)} łącznie · ${trains(s.running)} w trasie`;
+  $("t-running").textContent = fmt.format(s.running);
+  $("t-running-note").textContent = s.day.inProgress != null ? `PLK podaje ${trains(s.day.inProgress)} w trasie` : "";
+  $("t-delayed").textContent = fmt.format(s.delayed);
+  $("t-delayed-note").textContent = s.running ? `${Math.round((100 * s.delayed) / s.running)}% pociągów w trasie` : "";
+  $("t-avg").textContent = `${fmt1.format(s.avg)} min`;
+  $("t-cancel").textContent = s.day.cancelled != null ? fmt.format(s.day.cancelled) : "–";
+  $("t-cancel-note").textContent = s.day.totalTrains != null
+    ? `+ ${fmt.format(s.day.partialCancelled ?? 0)} częściowo · na ${fmt.format(s.day.totalTrains)} kursów dziś` : "";
+
+  const maxC = Math.max(1, ...s.carriers.map((c) => c.total));
+  $("carriers").innerHTML = s.carriers.map((c) => `
+    <div class="bar-row" title="${esc(c.name)}">
+      <div class="bar-name">${esc(c.code === "?" ? "nieznany" : c.code)}</div>
+      <div class="bar-wrap"><div class="bar" style="width:calc((100% - 150px) * ${c.total / maxC})"></div>
+        <span class="bar-val"><b>${fmt.format(c.total)} min</b> · ${c.count} poc. · śr. ${fmt1.format(c.avg)}</span></div>
+    </div>`).join("");
+
+  const maxB = Math.max(1, ...s.buckets.map((b) => b.count));
+  $("buckets").innerHTML = s.buckets.map((b) => `
+    <div class="bar-row">
+      <div class="bar-name">${esc(b.label)} min</div>
+      <div class="bar-wrap"><div class="bar" style="width:calc((100% - 110px) * ${b.count / maxB})"></div>
+        <span class="bar-val"><b>${fmt.format(b.count)}</b> poc.</span></div>
+    </div>`).join("");
+
+  $("top").innerHTML = s.top.length ? s.top.map((t) => `
+    <tr>
+      <td class="num"><b>+${t.delay}</b> min</td>
+      <td title="${esc(t.carrierName)}">${esc(t.carrier)}${t.name ? ` <span class="muted">${esc(t.name)}</span>` : ""}</td>
+      <td>${esc(t.from)} → ${esc(t.to)}</td>
+      <td class="hide-sm">${esc(t.at)}</td>
+    </tr>`).join("") : `<tr><td colspan="4" class="muted">Brak pociągów w trasie</td></tr>`;
+
+  for (const c of s.carriers) carrierNames[c.code] = c.name;
+}
+
+function seriesValue(p) {
+  const c = $("carrier").value;
+  return c ? p.byCarrier[c] ?? 0 : p.total;
+}
+
+function niceMax(v) {
+  if (v <= 0) return 10;
+  const step = 10 ** Math.floor(Math.log10(v));
+  return Math.ceil(v / step / (v / step > 5 ? 2 : 1)) * step * (v / step > 5 ? 2 : 1);
+}
+
+function renderChart() {
+  const svg = $("svg"), tip = $("tip");
+  const pts = history.points.map((p) => ({ ts: p.ts, t: new Date(p.ts).getTime(), v: seriesValue(p), running: p.running }));
+  const label = $("carrier").value ? (carrierNames[$("carrier").value] || $("carrier").value) : "wszyscy przewoźnicy";
+  $("chart-sub").textContent = `minuty, pociągi w trasie · ${label}`;
+
+  $("history-table").innerHTML = `<thead><tr><th>Godzina</th><th class="num">Suma opóźnień [min]</th><th class="num">Pociągi w trasie</th></tr></thead><tbody>` +
+    pts.slice().reverse().map((p) => `<tr><td>${hhmm(p.ts)}</td><td class="num">${fmt.format(p.v)}</td><td class="num">${fmt.format(p.running)}</td></tr>`).join("") + "</tbody>";
+
+  const W = svg.clientWidth || 600, H = 260, m = { l: 48, r: 12, t: 12, b: 26 };
+  if (pts.length < 2) {
+    svg.innerHTML = "";
+    svg.insertAdjacentHTML("beforeend", `<text x="${W / 2}" y="${H / 2}" text-anchor="middle">${pts.length ? "Zbieram dane – wykres pojawi się po drugiej migawce" : "Brak danych dla tego dnia"}</text>`);
+    return;
+  }
+  const dayStart = new Date(history.day + "T00:00:00").getTime();
+  const t0 = Math.min(pts[0].t, dayStart + 4 * 3600e3), t1 = Math.max(pts[pts.length - 1].t, t0 + 3600e3);
+  const yMax = niceMax(Math.max(...pts.map((p) => p.v)));
+  const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
+  const y = (v) => m.t + (1 - v / yMax) * (H - m.t - m.b);
+
+  let g = "";
+  for (let i = 0; i <= 4; i++) {
+    const v = (yMax / 4) * i;
+    g += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--${i ? "grid" : "axis"})" stroke-width="1"/>`;
+    g += `<text x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end">${fmt.format(v)}</text>`;
+  }
+  const stepH = (t1 - t0) / 3600e3 > 12 ? 3 : (t1 - t0) / 3600e3 > 5 ? 2 : 1;
+  for (let t = Math.ceil(t0 / 3600e3) * 3600e3; t <= t1; t += 3600e3) {
+    const h = new Date(t).getHours();
+    if (h % stepH) continue;
+    g += `<text x="${x(t)}" y="${H - 6}" text-anchor="middle">${String(h).padStart(2, "0")}:00</text>`;
+  }
+  // przerwa w linii, gdy brakuje migawek dłużej niż 15 min
+  let d = "", area = "", seg = [];
+  const flush = () => {
+    if (!seg.length) return;
+    const line = seg.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
+    d += line;
+    area += `${line}L${x(seg[seg.length - 1].t).toFixed(1)},${y(0)}L${x(seg[0].t).toFixed(1)},${y(0)}Z`;
+    seg = [];
+  };
+  pts.forEach((p, i) => { if (i && p.t - pts[i - 1].t > 15 * 60e3) flush(); seg.push(p); });
+  flush();
+  const last = pts[pts.length - 1];
+  svg.innerHTML = g +
+    `<path d="${area}" fill="var(--series-wash)"/>` +
+    `<path d="${d}" fill="none" stroke="var(--series)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` +
+    `<circle cx="${x(last.t)}" cy="${y(last.v)}" r="4.5" fill="var(--series)" stroke="var(--surface)" stroke-width="2"/>` +
+    `<line id="xh" y1="${m.t}" y2="${H - m.b}" stroke="var(--axis)" stroke-width="1" visibility="hidden"/>` +
+    `<circle id="xd" r="4.5" fill="var(--series)" stroke="var(--surface)" stroke-width="2" visibility="hidden"/>` +
+    `<rect x="${m.l}" y="0" width="${W - m.l - m.r}" height="${H}" fill="transparent" id="hit"/>`;
+
+  const hit = $("hit"), xh = $("xh"), xd = $("xd");
+  const hide = () => { xh.setAttribute("visibility", "hidden"); xd.setAttribute("visibility", "hidden"); tip.style.opacity = 0; };
+  hit.addEventListener("pointerleave", hide);
+  hit.addEventListener("pointermove", (e) => {
+    const r = svg.getBoundingClientRect(), mx = e.clientX - r.left;
+    let best = pts[0];
+    for (const p of pts) if (Math.abs(x(p.t) - mx) < Math.abs(x(best.t) - mx)) best = p;
+    const px = x(best.t), py = y(best.v);
+    xh.setAttribute("x1", px); xh.setAttribute("x2", px); xh.setAttribute("visibility", "visible");
+    xd.setAttribute("cx", px); xd.setAttribute("cy", py); xd.setAttribute("visibility", "visible");
+    tip.innerHTML = `<div class="muted">${hhmm(best.ts)}</div><b>${fmt.format(best.v)} min</b> opóźnień<br><span class="muted">${trains(best.running)} w trasie</span>`;
+    tip.style.opacity = 1;
+    const tw = tip.offsetWidth;
+    tip.style.left = `${Math.min(Math.max(px - tw / 2, 0), W - tw)}px`;
+    tip.style.top = `${Math.max(py - tip.offsetHeight - 14, 0)}px`;
+  });
+}
+
+function fillCarrierSelect() {
+  const sel = $("carrier"), cur = sel.value;
+  const totals = {};
+  for (const p of history.points) for (const [c, v] of Object.entries(p.byCarrier)) totals[c] = (totals[c] || 0) + v;
+  const codes = Object.keys(totals).filter((c) => c !== "?").sort((a, b) => totals[b] - totals[a]);
+  sel.innerHTML = `<option value="">Wszyscy przewoźnicy</option>` +
+    codes.map((c) => `<option value="${esc(c)}">${esc(carrierNames[c] || c)}</option>`).join("");
+  if (codes.includes(cur)) sel.value = cur;
+}
+
+// pliki statyczne (lokalnie albo GitHub Pages); 404 = brak danych
+async function getJson(path) {
+  const r = await fetch(`${path}?t=${Math.floor(Date.now() / 60000)}`);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+async function loadDays() {
+  const days = (await getJson("data/days.json")) || [];
+  if (!days.includes(today())) days.unshift(today());
+  const sel = $("day"), cur = sel.value || today();
+  sel.innerHTML = days.map((d) => `<option value="${d}">${d === today() ? "Dziś" : new Date(d + "T12:00").toLocaleDateString("pl-PL", { weekday: "short", day: "numeric", month: "long" })}</option>`).join("");
+  sel.value = days.includes(cur) ? cur : today();
+}
+
+async function refresh() {
+  try {
+    renderNow(await getJson("data/now.json"));
+    const day = $("day").value || today();
+    history = (await getJson(`data/history/${day}.json`)) || { day, points: [] };
+    fillCarrierSelect();
+    renderChart();
+  } catch (e) {
+    $("status").textContent = `Nie udało się wczytać danych (${e.message})`;
+    $("status").className = "muted status-error";
+  }
+}
+
+$("day").addEventListener("change", refresh);
+$("carrier").addEventListener("change", renderChart);
+addEventListener("resize", renderChart);
+loadDays().then(refresh);
+setInterval(() => loadDays().then(refresh), 30000);
+</script>
+</body>
+</html>

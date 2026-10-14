@@ -1,0 +1,7 @@
+.env
+__pycache__/
+# cache tras i przewoźników z API (tylko katalog w głównym folderze, nie static/data)
+/data/
+# pliki generowane przez collect.py (stations.json jest w repozytorium)
+static/data/*
+!static/data/stations.json

@@ -1,0 +1,62 @@
+# Zbiera dane z API PKP PLK i, gdy są nowe, publikuje stronę (licznik + mapa) na GitHub Pages.
+# Wymaga: sekretu PKP_PLK_APIKEY oraz Settings -> Pages -> Source: "GitHub Actions".
+# Repozytorium prywatne: Pages tylko w planie Pro (strona i tak jest publiczna), a minuty Actions są
+# limitowane (Free 2000, Pro 3000 na miesiąc) - harmonogram jest wyłączony, uruchamianie ręczne.
+# Co 5 min to ok. 290 przebiegów na dobę - mieści się tylko w repozytorium publicznym.
+name: Zbieranie danych
+
+on:
+  # schedule:
+  #   - cron: "2-59/5 * * * *"  # nie o pełnej godzinie - wtedy GitHub najczęściej opóźnia zadania
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - id: pages
+        uses: actions/configure-pages@v5
+
+      - id: day
+        run: echo "day=$(TZ=Europe/Warsaw date +%F)" >> "$GITHUB_OUTPUT"
+
+      # trasy i przewoźnicy pobierani z API raz na dobę
+      - uses: actions/cache@v4
+        with:
+          path: data
+          key: plk-${{ steps.day.outputs.day }}
+
+      - id: collect
+        name: Zbierz dane z PKP PLK
+        env:
+          PKP_PLK_APIKEY: ${{ secrets.PKP_PLK_APIKEY }}
+          HISTORY_URL: ${{ steps.pages.outputs.base_url }}/data
+        run: python collect.py
+
+      - if: steps.collect.outputs.changed == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: static
+
+      - if: steps.collect.outputs.changed == 'true'
+        id: deploy
+        uses: actions/deploy-pages@v4
