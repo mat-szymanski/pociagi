@@ -1,0 +1,2 @@
+# skrypty dla serwera Linux zawsze z końcami linii LF (CRLF psuje sh)
+*.sh text eol=lf
