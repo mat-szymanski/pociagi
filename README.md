@@ -6,7 +6,9 @@ na danych z API Otwarte Dane Kolejowe PKP PLK.
 - `index.html` – licznik, wykres dnia, przewoźnicy, najbardziej opóźnione pociągi
 - `mapa.html` – mapa pociągów w trasie z kolorem wg opóźnienia, trasą i tabelą stacji po kliknięciu
 - `dyspozytornia.html` – makieta w stylu centrum sterowania: neonowa sieć torów, pociągi jako komety
-  (kolor = opóźnienie, ogon = kierunek i prędkość), licznik z wykresem dnia i pasek alertów
+  (kolor = opóźnienie, ogon = kierunek i prędkość), licznik z wykresem dnia i pasek alertów;
+  przełącznik 2D/3D: widok 3D (MapLibre GL, ładowany dopiero po przełączeniu) z pochyloną mapą, niebem
+  i świecącymi słupami nad opóźnionymi pociągami (wysokość = minuty opóźnienia), opcja „orbita”
 
 Strony są statyczne i czytają pliki JSON z `static/data/`, które tworzy `collect.py`.
 Dzięki temu ten sam kod działa lokalnie i na GitHub Pages.

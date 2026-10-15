@@ -30,6 +30,21 @@
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; background: var(--bg); color: var(--ink); font: 500 15px/1.35 var(--text); overflow: hidden; }
   #map { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 40%, #071426 0%, #03060d 70%); }
+  #map3d { position: absolute; inset: 0; display: none; background: #03060d; }
+  body.m3d #map { display: none; }
+  body.m3d #map3d { display: block; }
+  body.m3d .fx.grid { display: none; }
+  .maplibregl-ctrl-attrib { background: rgba(3, 6, 13, 0.7) !important; color: var(--muted); font: 11px var(--text); }
+  .maplibregl-ctrl-attrib a { color: var(--ink-2); }
+  .maplibregl-ctrl-bottom-right { bottom: 40px; }
+  .hub3d { display: flex; align-items: center; gap: 6px; pointer-events: none; font: 600 13px/1 var(--text); letter-spacing: 0.08em;
+    color: rgba(200, 235, 255, 0.92); text-shadow: 0 0 8px rgba(80, 190, 255, 0.9); white-space: nowrap; }
+  .hub3d i { width: 6px; height: 6px; border-radius: 50%; background: #e8f6ff; box-shadow: 0 0 0 3px rgba(120, 220, 255, 0.35), 0 0 10px #7fd8ff; }
+  #map3d.far .hub3d.minor { display: none; }
+  .seg { display: inline-flex; border: 1px solid var(--edge); border-radius: 3px; overflow: hidden; }
+  .seg button { font: 700 12px/1 var(--display); letter-spacing: 0.12em; color: var(--ink-2); background: transparent; border: 0; padding: 5px 12px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: rgba(90, 200, 255, 0.18); color: var(--ink); text-shadow: 0 0 8px var(--edge-hot); }
+  body:not(.m3d) .only3d { display: none; }
   .leaflet-container { background: transparent; font: inherit; cursor: crosshair; }
   .leaflet-control-attribution { background: rgba(3, 6, 13, 0.7) !important; color: var(--muted); font: 11px var(--text); }
   .leaflet-control-attribution a { color: var(--ink-2); }
@@ -115,7 +130,9 @@
 
   @media (max-width: 800px) {
     #brand { width: auto; right: 16px; padding: 10px 12px; }
-    #brand .clock, .toggles { display: none; }
+    #brand .clock, #tg-extra { display: none; }
+    #brand .toggles { margin-top: 8px; }
+    body.sel #counter { display: none; }  /* panel pociągu zajmuje miejsce licznika */
     #counter { top: auto; bottom: 52px; left: 16px; right: 16px; width: auto; padding: 10px 12px; }
     #total { font-size: 40px; }
     #spark, #legend { display: none; }
@@ -129,6 +146,7 @@
 </head>
 <body>
 <div id="map" role="application" aria-label="Mapa sieci kolejowej z pociągami w trasie"></div>
+<div id="map3d" role="application" aria-label="Widok 3D sieci kolejowej z pociągami w trasie"></div>
 <div class="fx grid"></div>
 <div class="fx scan"></div>
 <div class="fx vignette"></div>
@@ -139,7 +157,11 @@
   <div class="label" id="data-ts">łączenie…</div>
   <div class="clock num" id="clock">--:--<small>:--</small></div>
   <nav><a href="./">Licznik</a><a href="mapa.html">Mapa</a></nav>
-  <div class="toggles">
+  <div class="toggles" id="tg-view">
+    <span class="seg" role="group" aria-label="Widok" id="mode"><button data-mode="2d" aria-pressed="true">2D</button><button data-mode="3d" id="mode-3d" aria-pressed="false">3D</button></span>
+    <label class="only3d"><input type="checkbox" id="t-orbit"> orbita</label>
+  </div>
+  <div class="toggles" id="tg-extra">
     <label><input type="checkbox" id="t-base"> podkład</label>
     <label><input type="checkbox" id="t-trails" checked> ogony</label>
   </div>
@@ -160,7 +182,7 @@
 <section class="hud" id="legend">
   <div class="label">Pociąg = kometa · kolor = opóźnienie</div>
   <div id="legend-rows"></div>
-  <div class="hint">Ogon pokazuje kierunek i prędkość. Jaśniejsze tory – odcinki, po których teraz jadą pociągi. Pozycje szacowane z czasów przejazdu przez stacje.</div>
+  <div class="hint">Ogon pokazuje kierunek i prędkość. Jaśniejsze tory – odcinki, po których teraz jadą pociągi. W widoku 3D wysokość słupa = minuty opóźnienia. Pozycje szacowane z czasów przejazdu przez stacje.</div>
 </section>
 
 <section class="hud" id="detail" aria-live="polite"></section>
@@ -345,7 +367,7 @@ const TrainLayer = L.Layer.extend({
     requestAnimationFrame(loop);
   },
   draw() {
-    if (!data) return;
+    if (!data || mode === "3d") return;
     const c = this._c, size = map.getSize(), dpr = devicePixelRatio || 1;
     if (c.width !== size.x * dpr || c.height !== size.y * dpr) {
       c.width = size.x * dpr; c.height = size.y * dpr; c.style.width = size.x + "px"; c.style.height = size.y + "px";
@@ -498,6 +520,7 @@ function renderLegend() {
 function renderDetail() {
   const tr = selected && data?.trains.find((x) => x.id === selected);
   const el = $("detail");
+  document.body.classList.toggle("sel", !!tr);
   if (!tr) { el.classList.remove("on"); el.innerHTML = ""; selected = null; return; }
   const li = lvl(tr.d), col = rgba(LEVELS[li].c, 1);
   const t = Date.now() / 1000, loc = locate(tr, t), s = tr._s;
@@ -523,14 +546,7 @@ function nearest(pt) {
 }
 map.on("mousemove", (e) => {
   hover = nearest(e.containerPoint);
-  const tip = $("tip");
-  if (!hover) { tip.style.display = "none"; return; }
-  const tr = hover.tr, li = lvl(tr.d);
-  tip.innerHTML = `<b style="color:${rgba(LEVELS[li].c, 1)}">+${tr.d} min</b> · <b>${esc(title(tr))}</b><br>` +
-    `<span style="color:#9cc3d9">${esc(stationName(tr.s[0][0]))} → ${esc(stationName(tr.s[tr.s.length - 1][0]))}</span>`;
-  tip.style.display = "block";
-  tip.style.left = `${e.containerPoint.x + 16}px`;
-  tip.style.top = `${e.containerPoint.y + 12}px`;
+  showTip(hover && hover.tr, e.containerPoint);
 });
 map.on("mouseout", () => { hover = null; $("tip").style.display = "none"; });
 map.on("click", (e) => {
@@ -544,9 +560,190 @@ $("ticker-track").addEventListener("click", (e) => {
   const tr = span && data?.trains.find((x) => x.no === span.dataset.no && x.c === span.dataset.c);
   if (!tr) return;
   const loc = locate(tr, Date.now() / 1000);
-  map.flyTo(loc.ll, 10, { duration: 1.2 });
+  if (mode === "3d") ml.flyTo({ center: [loc.ll[1], loc.ll[0]], zoom: 8.6, pitch: 62, duration: 1800 });
+  else map.flyTo(loc.ll, 10, { duration: 1.2 });
   selected = tr.id; renderDetail();
 });
+
+// ======================= WIDOK 3D: MapLibre GL, ładowany przy pierwszym przełączeniu =======================
+// Pochylona mapa, niebo z mgłą przy horyzoncie, neonowa sieć i świecące słupy nad opóźnionymi pociągami
+// (wysokość = minuty opóźnienia). Dane, panele i zaznaczanie są wspólne z widokiem 2D.
+const ML_VER = "5.24.0";
+const COL_M_PER_MIN = 900;  // wysokość słupa: 900 m na minutę opóźnienia (60 min = 54 km)
+let mode = "2d", ml = null, ml3dReady = null, heads3d = [], orbit = false, idleSince = 0, lastRoute = null;
+const LV_HEX = LEVELS.map((l) => `rgb(${l.c.join(",")})`);
+const byLv = ["match", ["get", "lv"], 1, LV_HEX[1], 2, LV_HEX[2], 3, LV_HEX[3], LV_HEX[0]];
+const zoomed = (a, b) => ["interpolate", ["exponential", 1.6], ["zoom"], 5, a, 11, b];
+
+function loadAsset(tag, attrs) {
+  return new Promise((res, rej) => {
+    const el = Object.assign(document.createElement(tag), attrs);
+    el.onload = res;
+    el.onerror = () => rej(new Error(`nie udało się załadować ${attrs.src || attrs.href}`));
+    document.head.appendChild(el);
+  });
+}
+
+function ensure3d() {
+  if (ml3dReady) return ml3dReady;
+  ml3dReady = (async () => {
+    const cdn = `https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/${ML_VER}/`;
+    await Promise.all([loadAsset("link", { rel: "stylesheet", href: cdn + "maplibre-gl.css" }), loadAsset("script", { src: cdn + "maplibre-gl.js" })]);
+    ml = new maplibregl.Map({
+      container: "map3d", attributionControl: false, maxPitch: 78, center: [19.3, 51.9], zoom: 5.3, pitch: 58, bearing: -12,
+      style: {
+        version: 8, sources: {}, layers: [{ id: "bg", type: "background", paint: { "background-color": "#03060d" } }],
+        sky: { "sky-color": "#061a33", "horizon-color": "#1d5fa3", "fog-color": "#03060d",
+               "sky-horizon-blend": 0.55, "horizon-fog-blend": 0.6, "fog-ground-blend": 0.25, "atmosphere-blend": 0 },
+      },
+    });
+    ml.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution:
+      'Dane: <a href="https://www.plk-sa.pl/klienci-i-kontrahenci/api-otwarte-dane">PKP PLK</a> · sieć i stacje: ' +
+      '<a href="https://github.com/JanKemnitz/PolishTrainsGTFS">PolishTrainsGTFS</a> (CC0)' }), "bottom-right");
+    await new Promise((r) => ml.on("load", r));
+    const empty = { type: "FeatureCollection", features: [] };
+    for (const id of ["net", "route", "trails", "heads", "cols"]) ml.addSource(id, { type: "geojson", data: empty });
+    const round = { "line-cap": "round", "line-join": "round" };
+    const active = ["==", ["get", "a"], 1];
+    ml.addLayer({ id: "net-glow", type: "line", source: "net", layout: round, paint: {
+      "line-color": ["case", active, "#5ac8ff", "#2f7bff"], "line-width": zoomed(3, 16), "line-blur": zoomed(2, 12),
+      "line-opacity": ["case", active, 0.2, 0.1] } });
+    ml.addLayer({ id: "net-core", type: "line", source: "net", layout: round, paint: {
+      "line-color": ["case", active, "#8fe3ff", "#3d7dff"], "line-width": zoomed(0.6, 2.4), "line-opacity": ["case", active, 0.6, 0.35] } });
+    ml.addLayer({ id: "route-glow", type: "line", source: "route", layout: round, paint: {
+      "line-color": "#ffffff", "line-width": zoomed(6, 20), "line-blur": zoomed(4, 12), "line-opacity": 0.25 } });
+    ml.addLayer({ id: "route-core", type: "line", source: "route", layout: round, paint: {
+      "line-color": "#ffffff", "line-width": zoomed(1.4, 3.5), "line-opacity": 0.95 } });
+    ml.addLayer({ id: "trails", type: "line", source: "trails", layout: round, paint: {
+      "line-color": byLv, "line-opacity": ["get", "o"], "line-blur": 0.6,
+      "line-width": ["interpolate", ["exponential", 1.6], ["zoom"], 5, ["*", ["get", "w"], 0.9], 11, ["*", ["get", "w"], 3]] } });
+    const glowR = ["match", ["get", "lv"], 1, 1.5, 2, 1.9, 3, 2.4, 1];
+    ml.addLayer({ id: "head-glow", type: "circle", source: "heads", paint: {
+      "circle-color": byLv, "circle-blur": 0.9, "circle-opacity": 0.85, "circle-pitch-alignment": "map",
+      "circle-radius": ["interpolate", ["exponential", 1.6], ["zoom"], 5, ["*", glowR, 4], 11, ["*", glowR, 16]] } });
+    ml.addLayer({ id: "head-core", type: "circle", source: "heads", paint: {
+      "circle-color": "#ffffff", "circle-radius": zoomed(1.1, 3.4), "circle-pitch-alignment": "map" } });
+    ml.addLayer({ id: "cols", type: "fill-extrusion", source: "cols", paint: {
+      "fill-extrusion-color": byLv, "fill-extrusion-height": ["get", "h"], "fill-extrusion-base": 0,
+      "fill-extrusion-opacity": 0.85, "fill-extrusion-vertical-gradient": true } });
+    for (const h of hubs) {  // podpisy węzłów jako elementy HTML (bez serwera czcionek)
+      const el = document.createElement("div");
+      el.className = `hub3d${h.minor || h.second ? " minor" : ""}`;
+      el.innerHTML = `<i></i>${esc(h.name.toUpperCase())}`;
+      new maplibregl.Marker({ element: el, anchor: "left", offset: [-5, 0] }).setLngLat([h.ll[1], h.ll[0]]).addTo(ml);
+    }
+    const far = () => $("map3d").classList.toggle("far", ml.getZoom() < 6);
+    ml.on("zoom", far); far();
+    // interakcja: najbliższy pociąg pod kursorem
+    const nearest3d = (pt) => {
+      let best = null, bd = 16;
+      for (const h of heads3d) {
+        const q = ml.project([h.ll[1], h.ll[0]]);
+        const d = Math.hypot(q.x - pt.x, q.y - pt.y);
+        if (d < bd) { bd = d; best = { ...h, x: q.x, y: q.y }; }
+      }
+      return best;
+    };
+    ml.on("mousemove", (e) => { const h = nearest3d(e.point); ml.getCanvas().style.cursor = h ? "pointer" : ""; showTip(h && h.tr, e.point); });
+    ml.on("mouseout", () => showTip(null));
+    ml.on("click", (e) => { const h = nearest3d(e.point); selected = h ? (h.tr.id === selected ? null : h.tr.id) : null; renderDetail(); });
+    for (const ev of ["mousedown", "touchstart", "wheel"]) ml.on(ev, () => (idleSince = Date.now() + 4000));
+    update3dNet();
+    // klatki: pozycje co 100 ms, obrót kamery płynnie
+    setInterval(frame3d, 100);
+    const spin = () => {
+      if (mode === "3d" && orbit && Date.now() > idleSince && !ml.isMoving()) ml.setBearing(ml.getBearing() + 0.04);
+      requestAnimationFrame(spin);
+    };
+    requestAnimationFrame(spin);
+  })();
+  return ml3dReady;
+}
+
+function update3dNet() {
+  if (!ml?.getSource("net")) return;
+  ml.getSource("net").setData({ type: "FeatureCollection", features: edges.map((e) => ({
+    type: "Feature", properties: { a: activeEdges.has(e.key) ? 1 : 0 },
+    geometry: { type: "LineString", coordinates: e.pts.map((p) => [p[1], p[0]]) } })) });
+}
+
+function frame3d() {
+  if (mode !== "3d" || !data || !ml?.getSource("heads")) return;
+  const t = Date.now() / 1000, trailsOn = $("t-trails").checked;
+  const headsF = [], trailsF = [], colsF = [];
+  // podstawa słupa ~5 px niezależnie od przybliżenia
+  const side = Math.max(500, (78271.5 * Math.cos((52 * Math.PI) / 180)) / 2 ** ml.getZoom() * 5);
+  const dLat = side / 2 / 111320;
+  heads3d = [];
+  for (const tr of data.trains) {
+    const loc = locate(tr, t);
+    if (!loc) continue;
+    const lv = lvl(tr.d), [lat, lon] = loc.ll;
+    heads3d.push({ tr, ll: loc.ll });
+    headsF.push({ type: "Feature", properties: { lv }, geometry: { type: "Point", coordinates: [lon, lat] } });
+    if (trailsOn) {
+      const pts = [[lon, lat]];
+      for (let k = 1; k <= 12; k++) { const l2 = locate(tr, t - k * 15); if (!l2) break; pts.push([l2.ll[1], l2.ll[0]]); }
+      for (let j = 0; j < 4 && j * 3 + 1 < pts.length; j++) {
+        trailsF.push({ type: "Feature", properties: { lv, o: (1 - j / 4) * (lv ? 0.85 : 0.6), w: 2.6 - j * 0.5 },
+          geometry: { type: "LineString", coordinates: pts.slice(j * 3, j * 3 + 4) } });
+      }
+    }
+    if (lv) {
+      const dLon = dLat / Math.cos((lat * Math.PI) / 180);
+      colsF.push({ type: "Feature", properties: { lv, h: tr.d * COL_M_PER_MIN }, geometry: { type: "Polygon", coordinates: [[
+        [lon - dLon, lat - dLat], [lon + dLon, lat - dLat], [lon + dLon, lat + dLat], [lon - dLon, lat + dLat], [lon - dLon, lat - dLat]]] } });
+    }
+  }
+  const fc = (features) => ({ type: "FeatureCollection", features });
+  ml.getSource("heads").setData(fc(headsF));
+  ml.getSource("trails").setData(fc(trailsF));
+  ml.getSource("cols").setData(fc(colsF));
+  if (lastRoute !== selected) {  // trasa wybranego pociągu
+    lastRoute = selected;
+    const tr = selected && data.trains.find((x) => x.id === selected);
+    const coords = [];
+    if (tr) for (let k = 0; k + 1 < tr._s.length; k++) for (const p of segment(tr._s[k][0], tr._s[k + 1][0]).pts) coords.push([p[1], p[0]]);
+    ml.getSource("route").setData(fc(coords.length > 1 ? [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: coords } }] : []));
+  }
+}
+
+async function setMode(m) {
+  if (m === "3d") {
+    $("mode-3d").textContent = "3D…";
+    try { await ensure3d(); } catch (e) { $("data-ts").textContent = `widok 3D niedostępny: ${e.message}`; $("mode-3d").textContent = "3D"; return; }
+    $("mode-3d").textContent = "3D";
+    if (mode !== "3d") {
+      const c = map.getCenter();
+      ml.jumpTo({ center: [c.lng, c.lat], zoom: Math.max(map.getZoom() - 1, 4.6), pitch: 58 });
+    }
+    document.body.classList.add("m3d");
+    ml.resize();
+    lastRoute = undefined;
+  } else if (mode === "3d") {
+    const c = ml.getCenter();
+    document.body.classList.remove("m3d");
+    map.invalidateSize();
+    map.setView([c.lat, c.lng], ml.getZoom() + 1, { animate: false });
+  }
+  mode = m;
+  for (const b of $("mode").children) b.setAttribute("aria-pressed", b.dataset.mode === m);
+  try { localStorage.setItem("kolej-dysp-mode", m); } catch {}
+}
+$("mode").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setMode(b.dataset.mode); });
+$("t-orbit").addEventListener("change", (e) => { orbit = e.target.checked; idleSince = 0; });
+
+// dymek wspólny dla 2D i 3D
+function showTip(tr, pt) {
+  const tip = $("tip");
+  if (!tr) { tip.style.display = "none"; return; }
+  const li = lvl(tr.d);
+  tip.innerHTML = `<b style="color:${rgba(LEVELS[li].c, 1)}">+${tr.d} min</b> · <b>${esc(title(tr))}</b><br>` +
+    `<span style="color:#9cc3d9">${esc(stationName(tr.s[0][0]))} → ${esc(stationName(tr.s[tr.s.length - 1][0]))}</span>`;
+  tip.style.display = "block";
+  tip.style.left = `${pt.x + 16}px`;
+  tip.style.top = `${pt.y + 12}px`;
+}
 
 // --- dane ---
 async function getJson(path) {
@@ -568,6 +765,8 @@ async function load() {
       activeEdges = new Set();
       for (const tr of data.trains) for (let k = 0; k + 1 < tr._s.length; k++) activeEdges.add(ekey(tr._s[k][0], tr._s[k + 1][0]));
       net.redraw();
+      update3dNet();
+      lastRoute = undefined;
       renderLegend();
       if (selected) renderDetail();
     }
@@ -599,7 +798,11 @@ Promise.all([getJson("data/stations.json"), getJson("data/segments.json")]).then
     minor: i >= 17, second: SECOND.has(n) }).filter(Boolean);
   net.addTo(map);
   trainsLayer.addTo(map);
-  return load();
+  return load().then(() => {
+    let saved = "2d";
+    try { saved = localStorage.getItem("kolej-dysp-mode") || "2d"; } catch {}
+    if (saved === "3d") setMode("3d");
+  });
 });
 setInterval(load, 60000);
 setInterval(() => {
