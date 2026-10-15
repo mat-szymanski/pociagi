@@ -101,14 +101,33 @@
   .train { background: none; border: 0; }
   .train .t { position: relative; width: 34px; height: 34px; transform: scale(var(--s, 1)); transition: transform 0.15s; }
   .train .rot { position: absolute; left: 0; top: 10px; width: 34px; height: 14px; transition: transform 1.5s linear; }
-  .train .halo { fill: none; stroke: var(--halo, transparent); stroke-width: 2.4; }
+  .train .halo { fill: none; stroke: var(--halo, transparent); stroke-width: 2; }
   .train .lv0 .halo { stroke: rgba(0, 0, 0, 0.5); stroke-width: 0.8; }
+  /* poświata pod opóźnionym pociągiem: im większe opóźnienie, tym większa plama */
+  .train .aura {
+    position: absolute; left: 50%; top: 50%; width: var(--aura, 0px); height: var(--aura, 0px);
+    transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none;
+    background: radial-gradient(circle, var(--halo) 0%, var(--halo) 38%, transparent 70%); opacity: 0.85;
+  }
+  .train .lv1 { --aura: 30px; }
+  .train .lv2 { --aura: 40px; }
+  .train .lv3 { --aura: 52px; }
+  /* tryb "kolory wg opóźnienia": cały wagonik w kolorze opóźnienia, bez barw przewoźnika */
+  #map.by-delay .train .body { fill: var(--lvc); }
+  #map.by-delay .train .liv { display: none; }
+  #map.by-delay .train .aura { opacity: 0.45; }
   .train .lbl {
-    position: absolute; left: 50%; bottom: 25px; transform: translateX(-50%); display: none;
+    position: absolute; left: 50%; bottom: 33px; transform: translateX(-50%); display: none; z-index: 2;
     font: 600 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 2px 5px; border-radius: 999px;
     background: var(--halo); color: var(--lbl-ink, #fff); white-space: nowrap; box-shadow: 0 0 0 1.5px var(--surface);
   }
   #map.labels .train .lbl { display: block; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+  .seg button { font: inherit; font-size: 13px; color: var(--ink-2); background: transparent; border: 0; padding: 3px 10px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--chip); color: var(--ink); font-weight: 600; }
+  .legend .swatch { width: 30px; height: 16px; display: grid; place-items: center; }
+  .legend .swatch span { width: var(--w); height: var(--w); border-radius: 50%;
+    background: radial-gradient(circle, var(--c) 0%, var(--c) 38%, transparent 70%); }
   .train.selected .t { transform: scale(calc(var(--s, 1) * 1.45)); }
   .train.selected .lv0 .halo { stroke: var(--ink); stroke-width: 2.4; }
   .train.selected .halo { stroke-width: 3; }
@@ -159,6 +178,10 @@
     <button class="chip" data-min="20">od 20 min</button>
     <button class="chip" data-min="60">od 60 min</button>
   </div>
+  <div class="row"><span class="muted">Kolory:</span>
+    <span class="seg" role="group" aria-label="Kolory pociągów" id="color-mode">
+      <button data-mode="carrier" aria-pressed="true">przewoźnik</button><button data-mode="delay" aria-pressed="false">opóźnienie</button>
+    </span></div>
   <div class="row"><label class="toggle"><input type="checkbox" id="rails" checked> Pokaż tory (OpenRailwayMap)</label></div>
 
   <div class="legend" id="legend"></div>
@@ -207,9 +230,9 @@ function trainSvg(c, w = 34, h = 14, cls = "rot") {
   const l = livery(c);
   return `<svg class="${cls}" viewBox="0 0 34 14" width="${w}" height="${h}" aria-hidden="true">
     <rect class="halo" x="0.8" y="0.8" width="32.4" height="12.4" rx="6.2"/>
-    <path d="M4,3 H25 Q31,3 31,7 Q31,11 25,11 H4 Q3,11 3,10 V4 Q3,3 4,3 Z" fill="${l.base}" stroke="var(--surface)" stroke-width="1.2"/>
-    <rect x="3.6" y="6" width="24" height="2" fill="${l.stripe}"/>
-    <path d="M25,3 Q31,3 31,7 Q31,11 25,11 Z" fill="${l.nose}"/>
+    <path class="body" d="M4,3 H25 Q31,3 31,7 Q31,11 25,11 H4 Q3,11 3,10 V4 Q3,3 4,3 Z" fill="${l.base}" stroke="var(--surface)" stroke-width="1.2"/>
+    <rect class="liv" x="3.6" y="6" width="24" height="2" fill="${l.stripe}"/>
+    <path class="liv" d="M25,3 Q31,3 31,7 Q31,11 25,11 Z" fill="${l.nose}"/>
     <path d="M12,3.6 V10.4 M20,3.6 V10.4" stroke="rgba(0,0,0,0.25)" stroke-width="0.8"/>
   </svg>`;
 }
@@ -233,7 +256,7 @@ $("rails").addEventListener("change", (e) => (e.target.checked ? rails.addTo(map
 function applyZoom() {
   const z = map.getZoom(), el = $("map");
   el.style.setProperty("--s", z <= 6 ? 0.5 : z === 7 ? 0.62 : z === 8 ? 0.78 : z <= 10 ? 0.95 : 1.2);
-  el.classList.toggle("labels", z >= 9);
+  el.classList.toggle("labels", z >= 8);
 }
 map.on("zoomend", applyZoom);
 applyZoom();
@@ -297,6 +320,17 @@ function headingAt(seg, f) {
 
 const markers = new Map();
 const filters = { carrier: "", min: 0, q: "" };
+
+// kolory pociągów: barwy przewoźnika + poświata opóźnienia albo cały pociąg w kolorze opóźnienia (zapamiętane)
+let colorMode = "carrier";
+try { colorMode = localStorage.getItem("kolej-color-mode") === "delay" ? "delay" : "carrier"; } catch {}
+function setColorMode(mode) {
+  colorMode = mode;
+  $("map").classList.toggle("by-delay", mode === "delay");
+  for (const b of $("color-mode").children) b.setAttribute("aria-pressed", b.dataset.mode === mode);
+  try { localStorage.setItem("kolej-color-mode", mode); } catch {}
+  update();
+}
 
 // --- pozycja: interpolacja między stacjami po czasach rzeczywistych (potwierdzonych) i prognozowanych ---
 const arr = (s) => s[1] || s[2];
@@ -404,10 +438,11 @@ function update() {
 
 function trainIcon(tr) {
   const li = LEVELS.indexOf(level(tr.d));
-  const halo = li ? `--halo:var(${LEVELS[li].color});--lbl-ink:${LBL_INK[li]};` : "";
+  const vars = `--lvc:var(${LEVELS[li].color});` + (li ? `--halo:var(${LEVELS[li].color});--lbl-ink:${LBL_INK[li]};` : "");
   return L.divIcon({
     className: `train${tr.id === selected ? " selected" : ""}`, iconSize: [34, 34], iconAnchor: [17, 17],
-    html: `<div class="t lv${li}" style="${halo}">${trainSvg(tr.c)}${li ? `<span class="lbl">+${tr.d}</span>` : ""}</div>`,
+    html: `<div class="t lv${li}" style="${vars}">${li ? '<span class="aura"></span>' : ""}${trainSvg(tr.c)}` +
+      `${li ? `<span class="lbl">+${tr.d}</span>` : ""}</div>`,
   });
 }
 
@@ -448,14 +483,17 @@ function renderLegend(counts, byCarrier, shown) {
   const codes = Object.keys(byCarrier).sort((a, b) => byCarrier[b] - byCarrier[a]);
   const named = codes.filter((c) => LIVERIES[c]);
   const other = codes.filter((c) => !LIVERIES[c]).reduce((n, c) => n + byCarrier[c], 0);
-  const ring = (li) => `<svg viewBox="0 0 34 14" width="30" height="13" aria-hidden="true"><rect x="1" y="1" width="32" height="12" rx="6"
-    fill="none" stroke="${li ? `var(${LEVELS[li].color})` : "rgba(0,0,0,0.5)"}" stroke-width="${li ? 2.4 : 0.8}"/></svg>`;
+  const byDelay = colorMode === "delay";
+  const body = (li) => `<svg viewBox="0 0 34 14" width="30" height="13" aria-hidden="true"><path d="M4,3 H25 Q31,3 31,7 Q31,11 25,11 H4 Q3,11 3,10 V4 Q3,3 4,3 Z"
+    fill="var(${LEVELS[li].color})" stroke="rgba(0,0,0,0.35)" stroke-width="0.8"/></svg>`;
+  const aura = (li) => li ? `<span class="swatch"><span style="--c:var(${LEVELS[li].color});--w:${[0, 12, 15, 18][li]}px"></span></span>`
+    : `<span class="swatch"></span>`;
   $("legend").innerHTML =
-    `<h3>Opóźnienie – otoczka wokół pociągu</h3>` +
-    LEVELS.map((l, i) => `<div class="item">${ring(i)}<span>${l.label}${i ? "" : " (bez otoczki)"}</span><b>${counts[i]}</b></div>`).join("") +
-    `<h3>Przewoźnik – kolory pociągu</h3>` +
-    named.map((c) => `<div class="item">${trainSvg(c, 30, 13, "")}<span>${esc(data.carriers[c] || c)}</span><b>${byCarrier[c]}</b></div>`).join("") +
-    (other ? `<div class="item">${trainSvg("?", 30, 13, "")}<span>Pozostali</span><b>${other}</b></div>` : "") +
+    (byDelay ? `<h3>Opóźnienie – kolor pociągu</h3>` : `<h3>Opóźnienie – kolorowa poświata pod pociągiem</h3>`) +
+    LEVELS.map((l, i) => `<div class="item">${byDelay ? body(i) : aura(i)}<span>${l.label}${!byDelay && !i ? " (bez poświaty)" : ""}</span><b>${counts[i]}</b></div>`).join("") +
+    (byDelay ? "" : `<h3>Przewoźnik – kolory pociągu</h3>` +
+      named.map((c) => `<div class="item">${trainSvg(c, 30, 13, "")}<span>${esc(data.carriers[c] || c)}</span><b>${byCarrier[c]}</b></div>`).join("") +
+      (other ? `<div class="item">${trainSvg("?", 30, 13, "")}<span>Pozostali</span><b>${other}</b></div>` : "")) +
     `<div class="muted">Na mapie: ${shown} z ${data.trains.length} pociągów w trasie</div>`;
 }
 
@@ -554,6 +592,8 @@ $("search").addEventListener("keydown", (e) => {
   select(hit.id);
 });
 $("carrier").addEventListener("change", (e) => { filters.carrier = e.target.value; update(); });
+$("color-mode").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setColorMode(b.dataset.mode); });
+setColorMode(colorMode);
 $("min-delay").addEventListener("click", (e) => {
   const b = e.target.closest(".chip");
   if (!b) return;
