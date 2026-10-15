@@ -33,8 +33,11 @@ publikuje katalog `static/` na GitHub Pages. Repozytorium musi być publiczne: w
 Historia nie jest commitowana: przy każdym przebiegu `collect.py` dociąga ją z opublikowanej strony
 (`HISTORY_URL`) i publikuje ponownie.
 
-Ograniczenia GitHuba: zadania cykliczne co najmniej co 5 min, w godzinach szczytu bywają opóźniane
-albo pomijane; w publicznym repo wyłączają się po 60 dniach bez aktywności w repozytorium.
+Ograniczenia GitHuba: zadania cykliczne co najmniej co 5 min, w praktyce bywają uruchamiane co 30 min
+albo rzadziej; w publicznym repo wyłączają się po 60 dniach bez aktywności w repozytorium.
+Dlatego głównym zegarem jest cron na zewnętrznym serwerze (`tools/trigger.sh`, co 5 min), który przez API
+uruchamia workflow (`workflow_dispatch`) – zbieranie i publikacja nadal działają w GitHub Actions.
+Token: fine-grained, tylko repozytorium `pociagi`, uprawnienie Actions: Read and write.
 GitHub Pages może cache'ować pliki do ok. 10 min.
 
 ## Pliki

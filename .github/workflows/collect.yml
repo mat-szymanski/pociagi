@@ -5,9 +5,16 @@
 name: Zbieranie danych
 
 on:
+  # Harmonogram GitHuba bywa uruchamiany co 30 min albo rzadziej - głównym zegarem jest cron na serwerze
+  # (tools/trigger.sh co 5 min wywołuje workflow_dispatch); harmonogram zostaje jako zapas.
   schedule:
     - cron: "2-59/5 * * * *"  # nie o pełnej godzinie - wtedy GitHub najczęściej opóźnia zadania
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Pełna migawka i publikacja, nawet gdy PLK nie ma nowych danych"
+        type: boolean
+        default: false
   # zmiana strony lub skryptów: opublikuj od razu, nie czekając na nowe dane z PLK
   push:
     branches: [main]
@@ -53,8 +60,8 @@ jobs:
         env:
           PKP_PLK_APIKEY: ${{ secrets.PKP_PLK_APIKEY }}
           HISTORY_URL: ${{ steps.pages.outputs.base_url }}/data
-        # z harmonogramu tylko przy nowych danych; po pushu i ręcznie zawsze pełna migawka i wdrożenie
-        run: python collect.py ${{ github.event_name != 'schedule' && '--force' || '' }}
+        # z harmonogramu i crona tylko przy nowych danych; po pushu (i ręcznie z "force") zawsze pełna migawka
+        run: python collect.py ${{ (github.event_name == 'push' || inputs.force) && '--force' || '' }}
 
       - if: steps.collect.outputs.changed == 'true'
         uses: actions/upload-pages-artifact@v5
