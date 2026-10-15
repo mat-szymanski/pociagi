@@ -5,9 +5,12 @@ Koszt migawki: 1 /statistics + 2-3 /operations (PLK publikuje nowe dane co kilka
 rozkład z numerami pociągów i przewoźnicy pobierani raz na dobę (cache w data/).
 Czasy w API są lokalne (Europe/Warsaw) bez strefy - przeliczamy je sami, bo np. GitHub Actions działa w UTC.
 """
+import gzip
+import http.client
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from collections import Counter, defaultdict
@@ -34,18 +37,41 @@ def load_key():
     return os.environ.get("PKP_PLK_APIKEY")
 
 
-def get(path, key):
-    req = urllib.request.Request(BASE + path, headers={"X-API-Key": key, "Accept": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            limits = {k: v for k, v in resp.headers.items() if k.lower().startswith("x-ratelimit")}
-            return resp.status, json.load(resp), limits
-    except urllib.error.HTTPError as e:
-        return e.code, e.read().decode("utf-8", "replace")[:300], {}
-
-
 class ApiError(RuntimeError):
     pass
+
+
+class TransientError(ApiError):
+    """Zerwane połączenie, przekroczony czas albo błąd 5xx - zwykle mija przy następnej próbie."""
+
+
+RETRIES = (5, 20)  # odstępy (s) między kolejnymi próbami
+
+
+def get(path, key):
+    """GET do API z kompresją gzip (/operations: 31 MB -> 8 MB na stronę) i ponawianiem przy błędach sieci."""
+    req = urllib.request.Request(BASE + path, headers={
+        "X-API-Key": key, "Accept": "application/json", "Accept-Encoding": "gzip"})
+    for attempt, wait in enumerate((*RETRIES, None), 1):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                body = resp.read()
+                if resp.headers.get("Content-Encoding") == "gzip":
+                    body = gzip.decompress(body)
+                limits = {k: v for k, v in resp.headers.items() if k.lower().startswith("x-ratelimit")}
+                return resp.status, json.loads(body), limits
+        except urllib.error.HTTPError as e:
+            if e.code < 500 or wait is None:
+                return e.code, e.read().decode("utf-8", "replace")[:300], {}
+            error = f"HTTP {e.code}"
+        except (http.client.HTTPException, urllib.error.URLError, OSError, EOFError, ValueError) as e:
+            # IncompleteRead (PLK zrywa duże odpowiedzi), timeout, reset połączenia, ucięty gzip/JSON
+            if wait is None:
+                raise TransientError(f"{path}: {type(e).__name__}: {e}"[:300]) from e
+            error = type(e).__name__
+        print(f"  {path.split('?')[0]}: {error}, próba {attempt}, ponawiam za {wait} s", flush=True)
+        time.sleep(wait)
+    raise AssertionError("nieosiągalne")
 
 
 # --- czas warszawski bez zależności od strefy systemu (i bez pakietu tzdata na Windows) ---

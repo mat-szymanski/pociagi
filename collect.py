@@ -85,7 +85,13 @@ if __name__ == "__main__":
     key = plk.load_key()
     if not key or "wpisz" in key:
         sys.exit("Brak klucza: utwórz plik .env na wzór .env.example albo ustaw PKP_PLK_APIKEY.")
-    result = run(key, force="--force" in sys.argv)
+    try:
+        result = run(key, force="--force" in sys.argv)
+    except plk.TransientError as e:
+        # chwilowy problem z serwerem PLK mimo ponowień: nie oznaczamy przebiegu jako nieudany,
+        # kolejne wywołanie z crona (za 5 min) spróbuje znowu; błędy 4xx (np. zły klucz) nadal przerywają
+        print(f"::warning::Pominięto: serwer PLK nie odpowiedział poprawnie ({e})")
+        result = "bez zmian"
     print(result)
     if os.environ.get("GITHUB_OUTPUT"):  # GitHub Actions: wdrażaj stronę tylko przy nowych danych
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
