@@ -40,6 +40,38 @@ uruchamia workflow (`workflow_dispatch`) – zbieranie i publikacja nadal dział
 Token: fine-grained, tylko repozytorium `pociagi`, uprawnienie Actions: Read and write.
 GitHub Pages może cache'ować pliki do ok. 10 min.
 
+## Cron na serwerze – obsługa
+Na serwerze (przez SSH) są: skrypt `~/pociagi/trigger.sh`, token `~/pociagi/.github_token` (chmod 600)
+i log `~/pociagi/trigger.log`. Zadanie w crontabie: `*/5 * * * * sh <katalog domowy>/pociagi/trigger.sh`.
+
+**Czy działa?** `tail ~/pociagi/trigger.log` – kolejne wpisy co 5 minut z `HTTP 204`.
+Na GitHubie: zakładka Actions → „Zbieranie danych”, przebiegi `workflow_dispatch` co 5 minut.
+
+| Wpis w logu | Znaczenie |
+|---|---|
+| `HTTP 204` | OK |
+| `HTTP 401` | token wygasł albo jest błędny – wymień go (niżej) |
+| `HTTP 403` / `404` | token bez uprawnienia Actions: Read and write albo bez dostępu do repozytorium |
+| brak nowych wpisów | cron nie działa – sprawdź `crontab -l` |
+
+**Wymiana tokenu** (np. gdy wygasł):
+1. GitHub → https://github.com/settings/personal-access-tokens → stary token `pociagi-cron`:
+   **Regenerate token** (te same ustawienia) albo usuń go i utwórz nowy: Repository access → Only select
+   repositories → `pociagi`, Permissions → Actions: **Read and write**, nic więcej.
+2. Zaloguj się na serwer przez SSH (znak zachęty linuksowy, nie `PS ...>`) i wklej:
+   ```bash
+   read -rs T && printf '%s' "$T" > ~/pociagi/.github_token && chmod 600 ~/pociagi/.github_token && unset T && echo zapisano
+   ```
+   Kursor czeka (nic nie widać) → wklej **tylko token** → Enter → ma się pokazać `zapisano`.
+   Token nie trafia na ekran ani do historii poleceń.
+3. Test: `sh ~/pociagi/trigger.sh; tail -1 ~/pociagi/trigger.log` → `HTTP 204`.
+
+Tokenu nigdy nie wpisuj w wiersz poleceń ani nie wyświetlaj (`cat`) – jeśli wycieknie, usuń go na GitHubie
+i utwórz nowy. Poprawny token fine-grained ma 93 znaki: `wc -c ~/pociagi/.github_token`.
+
+**Wyłączenie / włączenie crona:** `crontab -e` i zakomentuj (`#`) albo odkomentuj linię z `trigger.sh`
+(`crontab -r` usuwa wszystkie zadania konta). Zapasowo działa też harmonogram GitHuba (rzadziej).
+
 ## Pliki
 - `plk.py` – klient API, czas warszawski, liczenie migawki i danych do mapy
 - `collect.py` – jeden przebieg zbierania → `static/data/*.json`
