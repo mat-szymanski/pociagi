@@ -2,6 +2,7 @@
 __pycache__/
 # cache tras i przewoźników z API (tylko katalog w głównym folderze, nie static/data)
 /data/
-# pliki generowane przez collect.py (stations.json jest w repozytorium)
+# pliki generowane przez collect.py (stations.json i segments.json są w repozytorium)
 static/data/*
 !static/data/stations.json
+!static/data/segments.json

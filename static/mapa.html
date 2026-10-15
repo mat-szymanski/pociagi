@@ -129,7 +129,7 @@
   <div id="panel-body">
   <nav><a href="./">Licznik</a><a href="mapa.html" aria-current="page">Mapa pociągów</a></nav>
   <div class="muted" id="status">Ładowanie…</div>
-  <div class="muted">Pozycja szacowana z czasów przejazdu przez stacje (PLK nie udostępnia GPS).</div>
+  <div class="muted">Pozycja szacowana z czasów przejazdu przez stacje, wzdłuż torów (PLK nie udostępnia GPS).</div>
 
   <div class="row">
     <input id="search" type="search" placeholder="Numer lub nazwa pociągu" aria-label="Szukaj pociągu" autocomplete="off">
@@ -174,7 +174,7 @@ const rails = L.tileLayer("https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}
   maxZoom: 19, subdomains: "abc", opacity: dark ? 0.3 : 0.35,
   attribution: '<a href="https://www.openrailwaymap.org/">OpenRailwayMap</a>',
 }).addTo(map);
-map.attributionControl.addAttribution('Dane: <a href="https://www.plk-sa.pl/klienci-i-kontrahenci/api-otwarte-dane">PKP PLK</a> · stacje: <a href="https://github.com/JanKemnitz/PolishTrainsGTFS">PolishTrainsGTFS</a> (CC0)');
+map.attributionControl.addAttribution('Dane: <a href="https://www.plk-sa.pl/klienci-i-kontrahenci/api-otwarte-dane">PKP PLK</a> · stacje i przebieg torów: <a href="https://github.com/JanKemnitz/PolishTrainsGTFS">PolishTrainsGTFS</a> (CC0)');
 $("rails").addEventListener("change", (e) => (e.target.checked ? rails.addTo(map) : rails.remove()));
 
 const renderer = L.canvas({ padding: 0.3 });
@@ -183,7 +183,49 @@ const routeRenderer = L.canvas({ padding: 0.3, pane: "route" });
 const routeLayer = L.layerGroup().addTo(map);
 const trainLayer = L.layerGroup().addTo(map);
 
-let stations = {}, data = null, selected = null;
+let stations = {}, segments = {}, data = null, selected = null;
+
+// --- przebieg torów między stacjami (data/segments.json, zakodowane polilinie, klucz "a_b" = kierunek a→b) ---
+function decodePolyline(str) {
+  const pts = [];
+  let i = 0, lat = 0, lon = 0;
+  while (i < str.length) {
+    for (const k of [0, 1]) {
+      let r = 0, sh = 0, b;
+      do { b = str.charCodeAt(i++) - 63; r |= (b & 31) << sh; sh += 5; } while (b >= 32);
+      const v = r & 1 ? ~(r >> 1) : r >> 1;
+      if (k === 0) lat += v; else lon += v;
+    }
+    pts.push([lat / 1e5, lon / 1e5]);
+  }
+  return pts;
+}
+
+const segCache = new Map();
+function segment(a, b) {
+  const key = `${a}_${b}`;
+  if (segCache.has(key)) return segCache.get(key);
+  let pts;
+  if (segments[key]) pts = decodePolyline(segments[key]);
+  else if (segments[`${b}_${a}`]) pts = decodePolyline(segments[`${b}_${a}`]).reverse();
+  else pts = [stations[a], stations[b]];  // brak przebiegu: prosta między stacjami
+  const cum = [0];
+  for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], (pts[k][1] - pts[k - 1][1]) * 0.63));
+  const seg = { pts, cum, len: cum[cum.length - 1] };
+  segCache.set(key, seg);
+  return seg;
+}
+
+// punkt w ułamku f długości odcinka (wzdłuż torów)
+function pointAt(seg, f) {
+  const target = seg.len * f;
+  let k = 1;
+  while (k < seg.cum.length - 1 && seg.cum[k] < target) k++;
+  const span = seg.cum[k] - seg.cum[k - 1] || 1;
+  const t = Math.min(Math.max((target - seg.cum[k - 1]) / span, 0), 1);
+  const p = seg.pts[k - 1], q = seg.pts[k];
+  return [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
+}
 const markers = new Map();
 const filters = { carrier: "", min: 0, q: "" };
 
@@ -215,9 +257,8 @@ function locate(tr, now) {
     }
   }
   if (!pos) pos = { i: s.length - 1, f: 0 };
-  const a = stations[s[pos.i][0]], b = stations[s[Math.min(pos.i + 1, s.length - 1)][0]];
   return {
-    latlng: [a[0] + (b[0] - a[0]) * pos.f, a[1] + (b[1] - a[1]) * pos.f],
+    latlng: pos.f ? pointAt(segment(s[pos.i][0], s[pos.i + 1][0]), pos.f) : stations[s[pos.i][0]],
     at: pos.f === 0 ? s[pos.i] : null,
     from: s[pos.i], to: pos.f ? s[pos.i + 1] : null, extraMin: Math.round(extra / 60),
     lastConfirmed: lastConf >= 0 ? s[lastConf] : null,
@@ -329,7 +370,8 @@ function renderDetail() {
   if (!tr) { $("detail").innerHTML = ""; selected = null; return; }
   const loc = locate(tr, Date.now() / 1000);
   const s = stopsOf(tr);
-  L.polyline(s.map((x) => stations[x[0]]), { renderer: routeRenderer, color: css("--route"), weight: 3, opacity: 0.85, interactive: false }).addTo(routeLayer);
+  const line = s.slice(1).reduce((acc, x, k) => acc.concat(segment(s[k][0], x[0]).pts.slice(1)), [stations[s[0][0]]]);
+  L.polyline(line, { renderer: routeRenderer, color: css("--route"), weight: 3, opacity: 0.85, interactive: false }).addTo(routeLayer);
   for (const x of s) L.circleMarker(stations[x[0]], { renderer: routeRenderer, radius: 3, weight: 1.5, color: css("--route"), fillColor: css("--surface"), fillOpacity: 1, interactive: false }).addTo(routeLayer);
   const lv = level(tr.d);
   const rows = tr.s.map((x) => {
@@ -412,7 +454,8 @@ $("min-delay").addEventListener("click", (e) => {
   update();
 });
 
-getJson("data/stations.json").then((s) => { stations = s; return load(); });
+Promise.all([getJson("data/stations.json"), getJson("data/segments.json").catch(() => ({}))])
+  .then(([st, sg]) => { stations = st; segments = sg; return load(); });
 setInterval(update, 2000);
 setInterval(load, 60000);
 </script>

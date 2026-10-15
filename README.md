@@ -42,6 +42,9 @@ GitHub Pages może cache'ować pliki do ok. 10 min.
 - `collect.py` – jeden przebieg zbierania → `static/data/*.json`
 - `server.py` – lokalnie: pętla `collect.py` + serwer plików
 - `tools/build_stations.py` – buduje `static/data/stations.json` ze współrzędnymi stacji
+- `tools/build_segments.py` – buduje `static/data/segments.json`: przebieg torów między kolejnymi stacjami
+  (A* po sieci z `geo.osm`, pary stacji z rozkładu PLK na 31 dni); po zmianie rozkładu uruchom ponownie –
+  dopisze brakujące pary
 - `delay_now.py` – migawka w konsoli, `check_api.py` – test klucza
 
 ## Metodologia
@@ -53,9 +56,11 @@ GitHub Pages może cache'ować pliki do ok. 10 min.
 - „Opóźniony” od 6 minut, jak w statystykach UTK.
 - Pozycja na mapie: interpolacja liniowa między stacjami po czasach rzeczywistych (potwierdzone) i prognozowanych
   przez PLK. Jeśli w chwili publikacji danych pociąg powinien był minąć następną stację, a PLK tego nie potwierdził,
-  reszta trasy jest przesuwana o tę różnicę. Linie między stacjami są proste, nie po torach.
+  reszta trasy jest przesuwana o tę różnicę. Pociąg porusza się wzdłuż torów (`segments.json`);
+  dla par stacji bez wyznaczonego przebiegu zostaje prosta.
 
 ## Źródła i licencje
 - Dane o ruchu: PKP Polskie Linie Kolejowe S.A. (API Otwarte Dane Kolejowe, regulamin wymaga podania źródła).
-- Współrzędne stacji: `geo.osm` z https://github.com/JanKemnitz/PolishTrainsGTFS (CC0-1.0).
+- Współrzędne stacji i sieć torów: `geo.osm` z https://github.com/JanKemnitz/PolishTrainsGTFS (CC0-1.0,
+  migrowane z PLRailMap).
 - Podkład mapy: © OpenStreetMap; tory: OpenRailwayMap.
