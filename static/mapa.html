@@ -52,7 +52,7 @@
   body { background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
   #map { position: absolute; inset: 0; background: var(--page); }
   .leaflet-container { font: inherit; }
-  /* podkład OSM wyciszony, żeby kolory opóźnień były najgłośniejsze */
+  /* podkład OSM wyciszony, żeby kolory pociągów i opóźnień były najgłośniejsze */
   .basemap { filter: grayscale(1) contrast(0.85) brightness(1.08); }
   @media (prefers-color-scheme: dark) {
     :root:where(:not([data-theme="light"])) .basemap { filter: grayscale(1) invert(1) brightness(0.75) contrast(0.9); }
@@ -91,9 +91,27 @@
   label.toggle { display: flex; gap: 6px; align-items: center; color: var(--ink-2); cursor: pointer; }
 
   .legend { display: grid; gap: 4px; margin-top: 12px; }
-  .legend div { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: center; }
+  .legend h3 { font-size: 12px; font-weight: 500; color: var(--muted); margin: 6px 0 0; }
+  .legend .item { display: grid; grid-template-columns: 30px 1fr auto; gap: 8px; align-items: center; }
   .dot { width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 0 2px var(--surface); }
   .legend b { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .legend svg { display: block; }
+
+  /* pociąg: SVG w barwach przewoźnika, obracany wzdłuż toru; otoczka = opóźnienie */
+  .train { background: none; border: 0; }
+  .train .t { position: relative; width: 34px; height: 34px; transform: scale(var(--s, 1)); transition: transform 0.15s; }
+  .train .rot { position: absolute; left: 0; top: 10px; width: 34px; height: 14px; transition: transform 1.5s linear; }
+  .train .halo { fill: none; stroke: var(--halo, transparent); stroke-width: 2.4; }
+  .train .lv0 .halo { stroke: rgba(0, 0, 0, 0.5); stroke-width: 0.8; }
+  .train .lbl {
+    position: absolute; left: 50%; bottom: 25px; transform: translateX(-50%); display: none;
+    font: 600 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 2px 5px; border-radius: 999px;
+    background: var(--halo); color: var(--lbl-ink, #fff); white-space: nowrap; box-shadow: 0 0 0 1.5px var(--surface);
+  }
+  #map.labels .train .lbl { display: block; }
+  .train.selected .t { transform: scale(calc(var(--s, 1) * 1.45)); }
+  .train.selected .lv0 .halo { stroke: var(--ink); stroke-width: 2.4; }
+  .train.selected .halo { stroke-width: 3; }
 
   .detail { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--grid); }
   .detail-head { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
@@ -162,6 +180,40 @@ const LEVELS = [
 ];
 const level = (d) => LEVELS.reduce((acc, l) => (d >= l.min ? l : acc), LEVELS[0]);
 
+// Barwy przewoźników (przybliżone): podstawa wagonu, pas, czoło. Łatwo poprawić w jednym miejscu.
+const LIVERIES = {
+  IC: { base: "#c9ced6", stripe: "#2f6fc4", nose: "#15275a" },     // PKP Intercity: szaro-niebiesko-granatowe
+  KD: { base: "#ffffff", stripe: "#f6c400", nose: "#f6c400" },     // Koleje Dolnośląskie: żółto-białe
+  PR: { base: "#ffffff", stripe: "#d6001c", nose: "#d6001c" },     // POLREGIO: czerwono-białe
+  KM: { base: "#ffffff", stripe: "#00843d", nose: "#ffcc00" },     // Koleje Mazowieckie: zielono-żółte
+  KS: { base: "#ffffff", stripe: "#0064b4", nose: "#ffd400" },     // Koleje Śląskie
+  KW: { base: "#ffffff", stripe: "#c4161c", nose: "#262626" },     // Koleje Wielkopolskie
+  "ŁKA": { base: "#ffffff", stripe: "#e2001a", nose: "#ffd200" },  // Łódzka Kolej Aglomeracyjna
+  "KMŁ": { base: "#ffffff", stripe: "#0057a4", nose: "#e30613" },  // Koleje Małopolskie
+  SKMT: { base: "#f5c400", stripe: "#00529f", nose: "#00529f" },   // SKM w Trójmieście: żółto-niebieskie
+  SKM: { base: "#ffffff", stripe: "#e30613", nose: "#ffd200" },    // SKM Warszawa
+  WKD: { base: "#ffffff", stripe: "#0067b1", nose: "#0067b1" },    // Warszawska Kolej Dojazdowa
+  AR: { base: "#ffffff", stripe: "#00a7b5", nose: "#00a7b5" },     // Arriva
+  RJ: { base: "#fdd800", stripe: "#1f1f1f", nose: "#fdd800" },     // RegioJet
+  "Leo Express": { base: "#2b2b2b", stripe: "#e3a14a", nose: "#2b2b2b" },
+  LEO: { base: "#2b2b2b", stripe: "#e3a14a", nose: "#2b2b2b" },
+};
+const OTHER_LIVERY = { base: "#e2e2e2", stripe: "#6b6b6b", nose: "#6b6b6b" };
+const livery = (c) => LIVERIES[c] || OTHER_LIVERY;
+const LBL_INK = ["#111", "#111", "#111", "#fff"];  // kolor liczby na tle otoczki (żółte/pomarańczowe tło - ciemny)
+
+// pociąg skierowany w prawo (czoło po prawej), 34x14; obrót robi CSS
+function trainSvg(c, w = 34, h = 14, cls = "rot") {
+  const l = livery(c);
+  return `<svg class="${cls}" viewBox="0 0 34 14" width="${w}" height="${h}" aria-hidden="true">
+    <rect class="halo" x="0.8" y="0.8" width="32.4" height="12.4" rx="6.2"/>
+    <path d="M4,3 H25 Q31,3 31,7 Q31,11 25,11 H4 Q3,11 3,10 V4 Q3,3 4,3 Z" fill="${l.base}" stroke="var(--surface)" stroke-width="1.2"/>
+    <rect x="3.6" y="6" width="24" height="2" fill="${l.stripe}"/>
+    <path d="M25,3 Q31,3 31,7 Q31,11 25,11 Z" fill="${l.nose}"/>
+    <path d="M12,3.6 V10.4 M20,3.6 V10.4" stroke="rgba(0,0,0,0.25)" stroke-width="0.8"/>
+  </svg>`;
+}
+
 // --- mapa ---
 const dark = matchMedia("(prefers-color-scheme: dark)").matches && document.documentElement.dataset.theme !== "light";
 const map = L.map("map", { zoomControl: false, preferCanvas: true }).fitBounds([[49.0, 14.1], [54.85, 24.15]]);
@@ -177,7 +229,15 @@ const rails = L.tileLayer("https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}
 map.attributionControl.addAttribution('Dane: <a href="https://www.plk-sa.pl/klienci-i-kontrahenci/api-otwarte-dane">PKP PLK</a> · stacje i przebieg torów: <a href="https://github.com/JanKemnitz/PolishTrainsGTFS">PolishTrainsGTFS</a> (CC0)');
 $("rails").addEventListener("change", (e) => (e.target.checked ? rails.addTo(map) : rails.remove()));
 
-const renderer = L.canvas({ padding: 0.3 });
+// wielkość pociągów i etykiety opóźnień zależą od przybliżenia
+function applyZoom() {
+  const z = map.getZoom(), el = $("map");
+  el.style.setProperty("--s", z <= 6 ? 0.5 : z === 7 ? 0.62 : z === 8 ? 0.78 : z <= 10 ? 0.95 : 1.2);
+  el.classList.toggle("labels", z >= 9);
+}
+map.on("zoomend", applyZoom);
+applyZoom();
+
 map.createPane("route").style.zIndex = 350;  // pod kropkami pociągów (overlayPane = 400)
 const routeRenderer = L.canvas({ padding: 0.3, pane: "route" });
 const routeLayer = L.layerGroup().addTo(map);
@@ -226,6 +286,15 @@ function pointAt(seg, f) {
   const p = seg.pts[k - 1], q = seg.pts[k];
   return [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
 }
+// kierunek odcinka w ułamku f, w stopniach na ekranie (0 = na wschód, dodatnie zgodnie z ruchem wskazówek zegara)
+function headingAt(seg, f) {
+  const target = seg.len * f;
+  let k = 1;
+  while (k < seg.cum.length - 1 && seg.cum[k] < target) k++;
+  const p = seg.pts[k - 1], q = seg.pts[k];
+  return Math.atan2(-(q[0] - p[0]), (q[1] - p[1]) * Math.cos(p[0] * Math.PI / 180)) * 180 / Math.PI;
+}
+
 const markers = new Map();
 const filters = { carrier: "", min: 0, q: "" };
 
@@ -257,7 +326,12 @@ function locate(tr, now) {
     }
   }
   if (!pos) pos = { i: s.length - 1, f: 0 };
+  // na stacji pociąg "patrzy" w stronę następnej (na końcowej - tak jak przyjechał)
+  const heading = pos.f ? headingAt(segment(s[pos.i][0], s[pos.i + 1][0]), pos.f)
+    : pos.i + 1 < s.length ? headingAt(segment(s[pos.i][0], s[pos.i + 1][0]), 0)
+    : pos.i > 0 ? headingAt(segment(s[pos.i - 1][0], s[pos.i][0]), 1) : 0;
   return {
+    heading,
     latlng: pos.f ? pointAt(segment(s[pos.i][0], s[pos.i + 1][0]), pos.f) : stations[s[pos.i][0]],
     at: pos.f === 0 ? s[pos.i] : null,
     from: s[pos.i], to: pos.f ? s[pos.i + 1] : null, extraMin: Math.round(extra / 60),
@@ -306,7 +380,7 @@ function tooltipHtml(tr, loc) {
 function update() {
   if (!data) return;
   const now = Date.now() / 1000;
-  const counts = LEVELS.map(() => 0);
+  const counts = LEVELS.map(() => 0), byCarrier = {};
   let shown = 0;
   for (const tr of data.trains) {
     const m = markers.get(tr.id);
@@ -314,18 +388,37 @@ function update() {
     if (!loc) { if (m) trainLayer.removeLayer(m); continue; }
     shown++;
     counts[LEVELS.indexOf(level(tr.d))]++;
+    byCarrier[tr.c] = (byCarrier[tr.c] || 0) + 1;
     if (!m) continue;
     m.setLatLng(loc.latlng);
     m._loc = loc;
     if (!trainLayer.hasLayer(m)) trainLayer.addLayer(m);
+    rotate(m, loc.heading);
   }
-  $("legend").innerHTML = LEVELS.map((l, i) =>
-    `<div><span class="dot" style="background:var(${l.color})"></span><span>${l.label}</span><b>${counts[i]}</b></div>`).join("") +
-    `<div class="muted" style="grid-template-columns:1fr">Na mapie: ${shown} z ${data.trains.length} pociągów w trasie</div>`;
+  renderLegend(counts, byCarrier, shown);
   if (selected) {
     const m = markers.get(selected);
     if ($("where") && m?._loc) $("where").innerHTML = where(m._loc);
   }
+}
+
+function trainIcon(tr) {
+  const li = LEVELS.indexOf(level(tr.d));
+  const halo = li ? `--halo:var(${LEVELS[li].color});--lbl-ink:${LBL_INK[li]};` : "";
+  return L.divIcon({
+    className: `train${tr.id === selected ? " selected" : ""}`, iconSize: [34, 34], iconAnchor: [17, 17],
+    html: `<div class="t lv${li}" style="${halo}">${trainSvg(tr.c)}${li ? `<span class="lbl">+${tr.d}</span>` : ""}</div>`,
+  });
+}
+
+function rotate(m, deg) {
+  const el = m.getElement()?.querySelector(".rot");
+  if (!el) return;
+  // obrót o najkrótszy kąt, żeby przejście CSS nie kręciło pociągiem o 360°
+  const prev = m._deg ?? deg;
+  const next = prev + ((((deg - prev) % 360) + 540) % 360 - 180);
+  m._deg = next;
+  el.style.transform = `rotate(${next}deg)`;
 }
 
 function buildMarkers() {
@@ -333,24 +426,37 @@ function buildMarkers() {
   for (const tr of data.trains) {
     seen.add(tr.id);
     let m = markers.get(tr.id);
-    const color = css(level(tr.d).color);
     if (!m) {
-      m = L.circleMarker([0, 0], { renderer, radius: 6, weight: 2, color: css("--surface"), fillOpacity: 1 });
-      m.bindTooltip("", { className: "tip", direction: "top", offset: [0, -6] });
+      m = L.marker([0, 0], { keyboard: false, icon: trainIcon(tr) });
+      m.bindTooltip("", { className: "tip", direction: "top", offset: [0, -10] });
       m.on("tooltipopen", () => m.setTooltipContent(tooltipHtml(m._train, m._loc)));
       m.on("click", (e) => { e.originalEvent._onTrain = true; select(m._train.id === selected ? null : m._train.id); });
+      m.on("add", () => { m._deg = undefined; if (m._loc) rotate(m, m._loc.heading); });
       markers.set(tr.id, m);
+    } else if (m._key !== `${tr.c}|${tr.d}`) {
+      m.setIcon(trainIcon(tr));
+      m._deg = undefined;
     }
+    m._key = `${tr.c}|${tr.d}`;
     m._train = tr;
-    m.setStyle(markerStyle(tr));
+    m.setZIndexOffset(tr.id === selected ? 100000 : tr.d * 10);  // bardziej opóźnione na wierzchu
   }
   for (const [id, m] of markers) if (!seen.has(id)) { trainLayer.removeLayer(m); markers.delete(id); }
 }
 
-function markerStyle(tr) {
-  const on = tr.id === selected;
-  return { fillColor: css(level(tr.d).color), radius: (tr.d >= 20 ? 7 : 6) + (on ? 3 : 0),
-           color: css(on ? "--ink" : "--surface"), weight: on ? 3 : 2 };
+function renderLegend(counts, byCarrier, shown) {
+  const codes = Object.keys(byCarrier).sort((a, b) => byCarrier[b] - byCarrier[a]);
+  const named = codes.filter((c) => LIVERIES[c]);
+  const other = codes.filter((c) => !LIVERIES[c]).reduce((n, c) => n + byCarrier[c], 0);
+  const ring = (li) => `<svg viewBox="0 0 34 14" width="30" height="13" aria-hidden="true"><rect x="1" y="1" width="32" height="12" rx="6"
+    fill="none" stroke="${li ? `var(${LEVELS[li].color})` : "rgba(0,0,0,0.5)"}" stroke-width="${li ? 2.4 : 0.8}"/></svg>`;
+  $("legend").innerHTML =
+    `<h3>Opóźnienie – otoczka wokół pociągu</h3>` +
+    LEVELS.map((l, i) => `<div class="item">${ring(i)}<span>${l.label}${i ? "" : " (bez otoczki)"}</span><b>${counts[i]}</b></div>`).join("") +
+    `<h3>Przewoźnik – kolory pociągu</h3>` +
+    named.map((c) => `<div class="item">${trainSvg(c, 30, 13, "")}<span>${esc(data.carriers[c] || c)}</span><b>${byCarrier[c]}</b></div>`).join("") +
+    (other ? `<div class="item">${trainSvg("?", 30, 13, "")}<span>Pozostali</span><b>${other}</b></div>` : "") +
+    `<div class="muted">Na mapie: ${shown} z ${data.trains.length} pociągów w trasie</div>`;
 }
 
 // zaznaczenie pociągu: trasa i panel budowane raz, potem co 2 s odświeżany tylko opis położenia
@@ -359,7 +465,9 @@ function select(id) {
   selected = id && data?.trains.some((t) => t.id === id) ? id : null;
   for (const tid of [prev, selected]) {
     const m = tid && markers.get(tid);
-    if (m) { m.setStyle(markerStyle(m._train)); if (tid === selected) m.bringToFront(); }
+    if (!m) continue;
+    m.getElement()?.classList.toggle("selected", tid === selected);
+    m.setZIndexOffset(tid === selected ? 100000 : m._train.d * 10);
   }
   renderDetail();
 }

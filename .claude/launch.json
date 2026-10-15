@@ -4,8 +4,24 @@
     {
       "name": "licznik",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-X", "utf8", "server.py"],
+      "runtimeArgs": [
+        "-X",
+        "utf8",
+        "server.py"
+      ],
       "port": 8000
+    },
+    {
+      "name": "strona",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8001",
+        "-d",
+        "static"
+      ],
+      "port": 8001
     }
   ]
 }
