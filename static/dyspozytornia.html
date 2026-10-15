@@ -291,25 +291,51 @@ const ekey = (a, b) => (a < b ? `${a}_${b}` : `${b}_${a}`);
 const stationName = (id) => data?.stationNames[id] || stations[id]?.[2] || id;
 const title = (tr) => [[tr.k, tr.no].filter(Boolean).join(" ") || data.carriers[tr.c] || tr.c, tr.n].filter(Boolean).join(" ");
 
+// --- kanwy przyklejone do mapy ---
+// Przy przybliżaniu kanwa jest skalowana i przesuwana razem z mapą (jak wektorowe warstwy Leafleta),
+// a P to zapas poza ekranem, żeby przy przeciąganiu nie było pustych brzegów.
+function canvasFrame(layer, c, P, maxDpr = 2) {
+  const size = map.getSize(), dpr = Math.min(devicePixelRatio || 1, maxDpr);
+  const off = size.multiplyBy(P).round(), full = size.add(off.multiplyBy(2));
+  if (c.width !== Math.round(full.x * dpr) || c.height !== Math.round(full.y * dpr)) {
+    c.width = Math.round(full.x * dpr); c.height = Math.round(full.y * dpr);
+    c.style.width = full.x + "px"; c.style.height = full.y + "px";
+  }
+  layer._center = map.getCenter(); layer._zoom = map.getZoom(); layer._P = P;
+  L.DomUtil.setTransform(c, map.containerPointToLayerPoint(off.multiplyBy(-1)), 1);
+  const ctx = c.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, off.x * dpr, off.y * dpr);  // rysujemy we współrzędnych ekranu
+  ctx.clearRect(-off.x, -off.y, full.x, full.y);
+  return { ctx, size, off };
+}
+function zoomCanvas(layer, c, e) {
+  if (layer._zoom === undefined) return;
+  const scale = map.getZoomScale(e.zoom, layer._zoom);
+  const pos = map.getSize().multiplyBy(0.5 + layer._P).multiplyBy(-scale)
+    .add(map.project(layer._center, e.zoom)).subtract(map._getNewPixelOrigin(e.center, e.zoom));
+  L.DomUtil.setTransform(c, pos, scale);
+}
+
 // --- warstwa sieci: neonowe tory, przerysowywane po przesunięciu/przybliżeniu ---
 const NetLayer = L.Layer.extend({
   onAdd(m) {
-    this._c = L.DomUtil.create("canvas", "net");
+    this._c = L.DomUtil.create("canvas", "net leaflet-zoom-animated");
     m.getPanes().overlayPane.appendChild(this._c);
-    m.on("moveend zoomend resize", this.redraw, this);
-    m.on("zoomstart", () => (this._c.style.opacity = 0));
+    m.on("moveend resize", this.redraw, this);  // moveend przychodzi też po każdym przybliżeniu
+    m.on("zoomanim", (e) => zoomCanvas(this, this._c, e));
+    // przy przeciąganiu dorysuj odsłaniane brzegi (co 150 ms; przy widoku kraju sieć mieści się w zapasie)
+    m.on("move", () => {
+      if (m._animatingZoom || m.getZoom() < 7 || Date.now() - (this._lastMove || 0) < 150) return;
+      this._lastMove = Date.now();
+      this.redraw();
+    });
     this.redraw();
   },
   redraw() {
-    const c = this._c, size = map.getSize(), dpr = devicePixelRatio || 1;
-    c.width = size.x * dpr; c.height = size.y * dpr; c.style.width = size.x + "px"; c.style.height = size.y + "px";
-    L.DomUtil.setPosition(c, map.containerPointToLayerPoint([0, 0]));
-    const ctx = c.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, size.x, size.y);
+    const P = 0.3, { ctx, size, off } = canvasFrame(this, this._c, P, 1.5);
     ctx.globalCompositeOperation = "lighter";
     ctx.lineCap = ctx.lineJoin = "round";
-    const z = zf(), pad = 50, bounds = map.getBounds().pad(0.1);
+    const z = zf(), bounds = map.getBounds().pad(P + 0.1);
     const path = (pts) => {
       ctx.beginPath();
       pts.forEach((p, i) => { const q = map.latLngToContainerPoint(p); i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y); });
@@ -342,7 +368,7 @@ const NetLayer = L.Layer.extend({
     for (const h of hubs) {
       if (map.getZoom() < 6.5 && h.minor || map.getZoom() < 7 && h.second) continue;
       const q = map.latLngToContainerPoint(h.ll);
-      if (q.x < -pad || q.y < -pad || q.x > size.x + pad || q.y > size.y + pad) continue;
+      if (q.x < -off.x || q.y < -off.y || q.x > size.x + off.x || q.y > size.y + off.y) continue;
       ctx.fillStyle = "rgba(232,246,255,0.9)";
       ctx.beginPath(); ctx.arc(q.x, q.y, 2.6, 0, 7); ctx.fill();
       ctx.strokeStyle = "rgba(120,220,255,0.6)"; ctx.lineWidth = 1;
@@ -352,30 +378,23 @@ const NetLayer = L.Layer.extend({
       ctx.fillText(h.name.toUpperCase(), q.x + 10, q.y);
       ctx.shadowBlur = 0;
     }
-    c.style.opacity = 1;
   },
 });
 
 // --- warstwa pociągów: komety, rysowane w każdej klatce ---
 const TrainLayer = L.Layer.extend({
   onAdd(m) {
-    this._c = L.DomUtil.create("canvas", "trains");
+    this._c = L.DomUtil.create("canvas", "trains leaflet-zoom-animated");
     m.getPanes().markerPane.appendChild(this._c);
-    m.on("zoomstart", () => (this._c.style.opacity = 0));
-    m.on("zoomend", () => (this._c.style.opacity = 1));
+    // w trakcie przybliżania nie przerysowujemy - ostatnia klatka skaluje się razem z mapą
+    m.on("zoomanim", (e) => { this._zooming = true; zoomCanvas(this, this._c, e); });
+    m.on("zoomend", () => { this._zooming = false; });
     const loop = (ts) => { if (!this._last || ts - this._last > 33) { this._last = ts; this.draw(); } requestAnimationFrame(loop); };
     requestAnimationFrame(loop);
   },
   draw() {
-    if (!data || mode === "3d") return;
-    const c = this._c, size = map.getSize(), dpr = devicePixelRatio || 1;
-    if (c.width !== size.x * dpr || c.height !== size.y * dpr) {
-      c.width = size.x * dpr; c.height = size.y * dpr; c.style.width = size.x + "px"; c.style.height = size.y + "px";
-    }
-    L.DomUtil.setPosition(c, map.containerPointToLayerPoint([0, 0]));
-    const ctx = c.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, size.x, size.y);
+    if (!data || mode === "3d" || this._zooming) return;
+    const { ctx, size } = canvasFrame(this, this._c, 0.1);
     const t = Date.now() / 1000, z = zf(), zoom = map.getZoom(), trails = $("t-trails").checked;
     const pulse = (Math.sin(t * 3) + 1) / 2;
     heads = [];
