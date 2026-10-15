@@ -47,7 +47,11 @@ def write_json(path, data):
 def run(key, force=False):
     """Zwraca opis wyniku; rzuca wyjątek przy błędzie API."""
     version, data_ts, _ = plk.data_version(key)
-    if not force and read_json(OUT / "version.json", {}).get("version") == version:
+    # GITHUB_SHA: wersja kodu strony; gdy opublikowana jest starsza (np. anulowany przebieg po pushu),
+    # publikujemy też bez nowych danych z PLK
+    code = os.environ.get("GITHUB_SHA", "")
+    published = read_json(OUT / "version.json", {})
+    if not force and published.get("version") == version and published.get("code", "") == code:
         return "bez zmian"
 
     summary, map_data = plk.snapshot(key, data_ts=data_ts)
@@ -72,7 +76,7 @@ def run(key, force=False):
     write_json(OUT / "days.json", days)
     write_json(OUT / "trains.json", map_data)
     write_json(OUT / "now.json", summary)
-    write_json(OUT / "version.json", {"version": version, "ts": summary["ts"]})
+    write_json(OUT / "version.json", {"version": version, "ts": summary["ts"], "code": code})
     return (f"dane {summary['ts']}: suma {summary['total']} min, w trasie {summary['running']}, "
             f"limit dobowy: {summary['limits'].get('Daily-Remaining')}")
 
