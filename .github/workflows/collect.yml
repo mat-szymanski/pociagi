@@ -68,6 +68,16 @@ jobs:
         with:
           path: static
 
+      # deploy-pages czasem nie widzi świeżo wysłanej paczki ("No artifacts named github-pages") -
+      # chwilowy błąd GitHuba, więc jedna ponowna próba po 30 s
       - if: steps.collect.outputs.changed == 'true'
         id: deploy
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+
+      - if: steps.collect.outputs.changed == 'true' && steps.deploy.outcome == 'failure'
+        run: sleep 30
+
+      - if: steps.collect.outputs.changed == 'true' && steps.deploy.outcome == 'failure'
+        id: deploy-retry
         uses: actions/deploy-pages@v5
