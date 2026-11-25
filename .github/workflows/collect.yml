@@ -21,7 +21,7 @@ on:
     paths: ["static/**", "*.py", ".github/workflows/collect.yml"]
 
 permissions:
-  contents: read
+  contents: write  # tylko do tworzenia commitów-wersji publikacji (bez zmiany gałęzi), patrz krok deploy
   pages: write
   id-token: write
 
@@ -72,7 +72,9 @@ jobs:
       # Własna publikacja (to samo API co actions/deploy-pages), bo:
       # - GitHub Pages pomija publikację z numerem wersji, który już był (od 25.11.2026 strona przestała się
       #   odświeżać), a deploy-pages bierze go z GITHUB_SHA, którego nie da się nadpisać - przy samych
-      #   zmianach danych to ciągle ten sam commit; tu każdy przebieg ma własny numer (SHA-1 z commita i przebiegu),
+      #   zmianach danych to ciągle ten sam commit. Numer musi być istniejącym commitem (inaczej 404), więc
+      #   każda publikacja tworzy przez API commit z tym samym drzewem co HEAD, nieprzypięty do żadnej gałęzi
+      #   (historia repozytorium się nie zmienia, GitHub z czasem sam je usuwa),
       # - deploy-pages szuka paczki listowaniem artefaktów, które bywa zawodne ("No artifacts named github-pages");
       #   tu numer paczki przychodzi wprost z kroku upload,
       # - do 3 prób przy błędzie albo przekroczonym czasie.
@@ -83,10 +85,11 @@ jobs:
           ARTIFACT_ID: ${{ steps.upload.outputs.artifact_id }}
         with:
           script: |
-            const crypto = require("crypto");
             const { owner, repo } = context.repo;
-            const version = crypto.createHash("sha1")
-              .update(`${context.sha}-${context.runId}-${process.env.GITHUB_RUN_ATTEMPT}`).digest("hex");
+            const { data: head } = await github.rest.git.getCommit({ owner, repo, commit_sha: context.sha });
+            const { data: marker } = await github.rest.git.createCommit({ owner, repo, tree: head.tree.sha, parents: [context.sha],
+              message: `Publikacja danych (przebieg ${context.runId}) - commit nieprzypięty do gałęzi` });
+            const version = marker.sha;
             const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
             const FINAL = ["deployment_failed", "deployment_content_failed", "deployment_cancelled", "deployment_lost"];
             for (let attempt = 1; ; attempt++) {
