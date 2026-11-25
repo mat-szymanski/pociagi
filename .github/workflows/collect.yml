@@ -68,12 +68,21 @@ jobs:
         with:
           path: static
 
+      # GitHub Pages pomija publikację z numerem wersji, który już był (od 25.11.2026 strona przestała się
+      # odświeżać), a deploy-pages bierze go z GITHUB_SHA - przy samych zmianach danych to ciągle ten sam
+      # commit. Każdy przebieg dostaje więc własny numer: SHA-1 z commita i numeru przebiegu.
+      - if: steps.collect.outputs.changed == 'true'
+        id: build
+        run: echo "version=$(printf '%s' "$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" | sha1sum | cut -c1-40)" >> "$GITHUB_OUTPUT"
+
       # deploy-pages czasem nie widzi świeżo wysłanej paczki ("No artifacts named github-pages") -
       # chwilowy błąd GitHuba, więc jedna ponowna próba po 30 s
       - if: steps.collect.outputs.changed == 'true'
         id: deploy
         continue-on-error: true
         uses: actions/deploy-pages@v5
+        env:
+          GITHUB_SHA: ${{ steps.build.outputs.version }}
 
       - if: steps.collect.outputs.changed == 'true' && steps.deploy.outcome == 'failure'
         run: sleep 30
@@ -81,3 +90,5 @@ jobs:
       - if: steps.collect.outputs.changed == 'true' && steps.deploy.outcome == 'failure'
         id: deploy-retry
         uses: actions/deploy-pages@v5
+        env:
+          GITHUB_SHA: ${{ steps.build.outputs.version }}
