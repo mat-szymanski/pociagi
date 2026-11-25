@@ -64,31 +64,49 @@ jobs:
         run: python collect.py ${{ (github.event_name == 'push' || inputs.force) && '--force' || '' }}
 
       - if: steps.collect.outputs.changed == 'true'
+        id: upload
         uses: actions/upload-pages-artifact@v5
         with:
           path: static
 
-      # GitHub Pages pomija publikację z numerem wersji, który już był (od 25.11.2026 strona przestała się
-      # odświeżać), a deploy-pages bierze go z GITHUB_SHA - przy samych zmianach danych to ciągle ten sam
-      # commit. Każdy przebieg dostaje więc własny numer: SHA-1 z commita i numeru przebiegu.
-      - if: steps.collect.outputs.changed == 'true'
-        id: build
-        run: echo "version=$(printf '%s' "$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" | sha1sum | cut -c1-40)" >> "$GITHUB_OUTPUT"
-
-      # deploy-pages czasem nie widzi świeżo wysłanej paczki ("No artifacts named github-pages") -
-      # chwilowy błąd GitHuba, więc jedna ponowna próba po 30 s
+      # Własna publikacja (to samo API co actions/deploy-pages), bo:
+      # - GitHub Pages pomija publikację z numerem wersji, który już był (od 25.11.2026 strona przestała się
+      #   odświeżać), a deploy-pages bierze go z GITHUB_SHA, którego nie da się nadpisać - przy samych
+      #   zmianach danych to ciągle ten sam commit; tu każdy przebieg ma własny numer (SHA-1 z commita i przebiegu),
+      # - deploy-pages szuka paczki listowaniem artefaktów, które bywa zawodne ("No artifacts named github-pages");
+      #   tu numer paczki przychodzi wprost z kroku upload,
+      # - do 3 prób przy błędzie albo przekroczonym czasie.
       - if: steps.collect.outputs.changed == 'true'
         id: deploy
-        continue-on-error: true
-        uses: actions/deploy-pages@v5
+        uses: actions/github-script@v9
         env:
-          GITHUB_SHA: ${{ steps.build.outputs.version }}
-
-      - if: steps.collect.outputs.changed == 'true' && steps.deploy.outcome == 'failure'
-        run: sleep 30
-
-      - if: steps.collect.outputs.changed == 'true' && steps.deploy.outcome == 'failure'
-        id: deploy-retry
-        uses: actions/deploy-pages@v5
-        env:
-          GITHUB_SHA: ${{ steps.build.outputs.version }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact_id }}
+        with:
+          script: |
+            const crypto = require("crypto");
+            const { owner, repo } = context.repo;
+            const version = crypto.createHash("sha1")
+              .update(`${context.sha}-${context.runId}-${process.env.GITHUB_RUN_ATTEMPT}`).digest("hex");
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+            const FINAL = ["deployment_failed", "deployment_content_failed", "deployment_cancelled", "deployment_lost"];
+            for (let attempt = 1; ; attempt++) {
+              try {
+                const { data } = await github.request("POST /repos/{owner}/{repo}/pages/deployments", {
+                  owner, repo, artifact_id: Number(process.env.ARTIFACT_ID),
+                  pages_build_version: version, oidc_token: await core.getIDToken() });
+                const id = data.id || data.status_url.split("/").pop();
+                core.info(`Publikacja ${version} (paczka ${process.env.ARTIFACT_ID}), id ${id}`);
+                for (let i = 0; i < 48; i++) {  // do 4 min
+                  await sleep(5000);
+                  const { data: st } = await github.request("GET /repos/{owner}/{repo}/pages/deployments/{id}", { owner, repo, id });
+                  if (st.status === "succeed") { core.info("Opublikowano."); core.setOutput("page_url", data.page_url); return; }
+                  if (FINAL.includes(st.status)) throw new Error(`status ${st.status}`);
+                  core.info(`status: ${st.status}`);
+                }
+                throw new Error("przekroczony czas publikacji");
+              } catch (e) {
+                if (attempt >= 3) throw e;
+                core.warning(`Próba ${attempt}: ${e.message} - ponawiam za 20 s`);
+                await sleep(20000);
+              }
+            }
