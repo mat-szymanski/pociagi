@@ -37,6 +37,11 @@ publikuje katalog `static/` na GitHub Pages. Repozytorium musi być publiczne: w
 Historia nie jest commitowana: przy każdym przebiegu `collect.py` dociąga ją z opublikowanej strony
 (`HISTORY_URL`) i publikuje ponownie.
 
+Publikacja nie używa `actions/deploy-pages`, tylko wywołuje API Pages w kroku `deploy`: od 25.11.2026
+GitHub Pages pomija publikacje z numerem wersji (commitem), który już był, a przy samych zmianach danych
+commit się nie zmienia. Każda publikacja tworzy więc commit z drzewem HEAD nieprzypięty do żadnej gałęzi
+(historia `main` się nie zmienia) i używa go jako numeru wersji.
+
 Ograniczenia GitHuba: zadania cykliczne co najmniej co 5 min, w praktyce bywają uruchamiane co 30 min
 albo rzadziej; w publicznym repo wyłączają się po 60 dniach bez aktywności w repozytorium.
 Dlatego głównym zegarem jest cron na zewnętrznym serwerze (`tools/trigger.sh`, co 5 min), który przez API
